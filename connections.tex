@@ -1,0 +1,108 @@
+\documentclass{article}
+\usepackage{tikz}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\title{PizzaController - Conexões do Sistema}
+\author{Eng. Fredy Osorio}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Descrição do Sistema}
+Este documento apresenta o esquema de conexões para o controlador de motor de passo NEMA23 usando ESP32 e driver DM556.
+
+\section{Esquema de Conexões}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=2cm, auto]
+
+% ESP32
+\node [draw, rectangle, minimum width=3cm, minimum height=2cm] (esp32) {ESP32};
+
+% Power Source
+\node [draw, rectangle, minimum width=2cm, minimum height=1cm, right=of esp32] (power) {Fonte de Alimentação};
+
+% DM556 Driver
+\node [draw, rectangle, minimum width=3cm, minimum height=3cm, right=of power] (dm556) {DM556 Driver};
+
+% NEMA23 Motor
+\node [draw, rectangle, minimum width=2cm, minimum height=2cm, right=of dm556] (motor) {NEMA23 Motor};
+
+% ESP32 pins
+\node [left=of esp32, xshift=-1cm] (esp32_pins) {};
+\node [below=of esp32_pins, yshift=-0.5cm] {GPIO 18 (STEP)};
+\node [below=of esp32_pins, yshift=-1cm] {GPIO 19 (DIR)};
+\node [below=of esp32_pins, yshift=-1.5cm] {GPIO 21 (ENABLE)};
+\node [below=of esp32_pins, yshift=-2cm] {GPIO 22 (MS1)};
+\node [below=of esp32_pins, yshift=-2.5cm] {GPIO 23 (MS2)};
+\node [below=of esp32_pins, yshift=-3cm] {GPIO 25 (MS3)};
+
+% Power connections
+\draw [->] (power) -- (dm556) node[midway, above] {+V, GND};
+
+% ESP32 to DM556 connections
+\draw [->] (esp32) -- (dm556) node[midway, above] {STEP};
+\draw [->] (esp32) -- (dm556) node[midway, below=0.3cm] {DIR};
+\draw [->] (esp32) -- (dm556) node[midway, below=0.6cm] {ENABLE};
+\draw [->] (esp32) -- (dm556) node[midway, below=0.9cm] {MS1};
+\draw [->] (esp32) -- (dm556) node[midway, below=1.2cm] {MS2};
+\draw [->] (esp32) -- (dm556) node[midway, below=1.5cm] {MS3};
+
+% DM556 to Motor connections
+\draw [->] (dm556) -- (motor) node[midway, above] {A+, A-};
+\draw [->] (dm556) -- (motor) node[midway, below] {B+, B-};
+
+% Labels
+\node [below=of esp32, yshift=-0.5cm] {Microcontrolador};
+\node [below=of power, yshift=-0.5cm] {24-48V DC};
+\node [below=of dm556, yshift=-0.5cm] {Driver de Motor};
+\node [below=of motor, yshift=-0.5cm] {Motor de Passo};
+
+\end{tikzpicture}
+\caption{Esquema de conexões do sistema PizzaController}
+\label{fig:connections}
+\end{figure}
+
+\section{Tabela de Conexões Detalhadas}
+
+\begin{table}[h]
+\centering
+\caption{Pinout das Conexões}
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Componente} & \textbf{Pino} & \textbf{Conectado a} \\
+\hline
+ESP32 & GPIO 18 & DM556 STEP \\
+ESP32 & GPIO 19 & DM556 DIR \\
+ESP32 & GPIO 21 & DM556 ENABLE (ativo baixo) \\
+ESP32 & GPIO 22 & DM556 MS1 \\
+ESP32 & GPIO 23 & DM556 MS2 \\
+ESP32 & GPIO 25 & DM556 MS3 \\
+\hline
+Fonte de Alimentação & +V & DM556 +V (24-48V DC) \\
+Fonte de Alimentação & GND & DM556 GND \\
+\hline
+DM556 & A+ & Motor A+ (Fase A) \\
+DM556 & A- & Motor A- (Fase A) \\
+DM556 & B+ & Motor B+ (Fase B) \\
+DM556 & B- & Motor B- (Fase B) \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Notas Importantes}
+
+\begin{itemize}
+\item Verifique a polaridade da fonte de alimentação antes de conectar
+\item As conexões ENABLE são ativas baixas (LOW = habilitado)
+\item Ajuste os pinos GPIO no código se a fiação for diferente
+\item Garanta que a corrente da fonte seja adequada para o motor NEMA23
+\item Use cabos de boa qualidade para evitar interferências
+\end{itemize}
+
+\end{document}
