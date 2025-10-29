@@ -21,8 +21,8 @@
 // Step 3: Define motor parameters
 // NEMA23 typically has 200 steps per revolution (full step).
 // With 1/256 microstepping, total steps per revolution = 200 * 256 = 51200
-const int STEPS_PER_REV = 51200;  // Steps per revolution at 1/256 microstep
-const int SPEED_DELAY = 250;      // Delay between steps in microseconds (adjust for speed)
+const int STEPS_PER_REV = 400;  // Steps per revolution at 1/256 microstep
+const int SPEED_DELAY = 500;      // Delay between steps in microseconds (adjust for speed)
 
 // Step 3.1: Global variables for position tracking
 long currentPosition = 0;         // Current position in steps from home
