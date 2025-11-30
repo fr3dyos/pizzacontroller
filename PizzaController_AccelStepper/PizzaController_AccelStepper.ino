@@ -544,6 +544,7 @@ void updateMenuDisplay() {
         lcd.print("Reset Home?");
         lcd.setCursor(0, 1);
         lcd.print("Sel:Yes Any:No");
+        delay(1000);
         break;
       case CONFIRM_SAVE_POS: // Confirm Save Position
         lcd.setCursor(0, 0);
@@ -552,6 +553,7 @@ void updateMenuDisplay() {
         lcd.print("?");
         lcd.setCursor(0, 1);
         lcd.print("Sel:Yes Any:No");
+        delay(1000);
         break;
     }
   }
