@@ -1,6 +1,6 @@
-# PizzaController - Controlador de Motor de Passo NEMA23 com ESP32
+# PizzaController - Controlador de Motor de Passo NEMA23 com ESP32 e AccelStepper
 
-Este projeto fornece um sketch completo do Arduino para controlar um motor de passo NEMA23 usando um microcontrolador ESP32 e um driver DM556. O programa está configurado para microstepping máximo (1/256) para alcançar controle de posicionamento preciso.
+Este projeto fornece um sketch completo do Arduino para controlar um motor de passo NEMA23 usando um microcontrolador ESP32 e um driver DM556. O programa usa a biblioteca AccelStepper para aceleração/desaceleração suave e está configurado para microstepping máximo (1/256) para alcançar controle de posicionamento preciso. Inclui um sistema de menu LCD para operação fácil e foi otimizado para melhor manutenção do código usando enums em vez de números mágicos.
 
 ## Requisitos de Hardware
 
@@ -45,9 +45,10 @@ O driver DM556 usa interruptores DIP para configurar microstepping e outras conf
 
 1. Instale o Arduino IDE
 2. Instale o suporte à placa ESP32 no Arduino IDE
-3. Abra `PizzaController.ino` no Arduino IDE
-4. Selecione a placa ESP32 correta e a porta
-5. Faça o upload do sketch
+3. Instale as bibliotecas necessárias: AccelStepper, Preferences, Wire, LiquidCrystal_I2C
+4. Abra `PizzaController_AccelStepper/PizzaController_AccelStepper.ino` no Arduino IDE
+5. Selecione a placa ESP32 correta e a porta
+6. Faça o upload do sketch
 
 ## Configuração
 
@@ -58,12 +59,7 @@ O programa está configurado para:
 
 ## Funcionalidade do Programa
 
-O programa principal demonstra controle básico do motor de passo através de:
-1. Rotação do motor no sentido horário por meia revolução
-2. Pausa de 1 segundo
-3. Rotação do motor no sentido anti-horário por meia revolução
-4. Pausa de 1 segundo
-5. Repetição do ciclo
+O programa inicializa o controlador do motor de passo e monitora continuamente comandos seriais para controlar o motor. Ele suporta funções de jogging, gerenciamento de posição, homing e teste. O motor pode ser controlado remotamente via comandos seriais ou programaticamente usando as funções fornecidas.
 
 ## Novos Recursos Adicionados
 
@@ -125,6 +121,9 @@ O programa suporta comandos seriais para controle remoto. Abra o Monitor Serial 
 - `SAVE_POS <num>`: Salvar a posição atual no slot 0-4 (ex.: `SAVE_POS 1`)
 - `LOAD_POS <num>`: Carregar posição do slot 0-4 (ex.: `LOAD_POS 1`)
 - `GET_POS`: Obter a posição atual
+- `TEST <passos>`: Iniciar a função de teste com o número especificado de passos (ex.: `TEST 1000`)
+- `RUN_TEST <passos>`: Iniciar a função de teste com o número especificado de passos (ex.: `RUN_TEST 1000`)
+- `STOP`: Parar a função de teste
 
 Qualquer outra entrada responderá com "Unknown command".
 
@@ -162,6 +161,46 @@ O programa gera mensagens de status no Monitor Serial a 115200 baud. Abra o Moni
 - Verifique se os pinos de microstepping (MS1, MS2, MS3) estão definidos corretamente para o modo 1/256
 - Garanta tensão e corrente adequadas da fonte de alimentação
 - Verifique o Monitor Serial para mensagens de inicialização
+
+## Otimizações de Código
+
+O código foi otimizado para melhor manutenção e legibilidade:
+
+- **Uso de Enum:** Substituiu números mágicos por valores enum descritivos (`NONE`, `JOG`, `SPEED`, `ACCEL`, `SAVE_POS`, `GOTO`, `GOTO_SAVED`) para estados de menu
+- **Biblioteca AccelStepper:** Usa a biblioteca AccelStepper para aceleração/desaceleração suave em vez de temporização manual de passos
+- **Configurações Persistentes:** Parâmetros do motor (passos por revolução, velocidade máxima, aceleração) são salvos na memória não-volátil
+- **Funções Modulares:** O código é organizado em funções lógicas para melhor legibilidade e manutenção
+
+## Sistema de Menu LCD
+
+O controlador inclui um sistema de menu LCD amigável para operação fácil sem um computador. O LCD I2C de 16x2 exibe opções de menu, e um teclado analógico de 5 botões permite navegação e entrada.
+
+### Opções de Menu
+
+1. **Jog**: Mover manualmente o motor inserindo o número de passos
+2. **Alterar Velocidade**: Ajustar a configuração de velocidade máxima
+3. **Alterar Aceleração**: Ajustar a configuração de aceleração
+4. **Home**: Mover o motor para a posição inicial (0)
+5. **Reset Home**: Definir a posição atual como novo home (requer confirmação)
+6. **Salvar Posição**: Salvar a posição atual em um dos 5 slots (requer confirmação)
+7. **Ir para Posição**: Mover para uma posição absoluta (pode ser negativa)
+8. **Ir para Posição Salva**: Carregar uma posição salva de um dos 5 slots
+
+### Controles do Teclado
+
+- **Cima/Baixo**: Navegar pelos itens do menu
+- **Esquerda/Direita**: Ajustar valores em sub-menus (incrementar/decrementar por 10)
+- **Cima/Baixo no sub-menu**: Ajustar valores por 100
+- **Selecionar**: Entrar no sub-menu ou executar ação
+
+### Navegação do Menu
+
+1. Use os botões Cima/Baixo para selecionar um item do menu
+2. Pressione Selecionar para entrar no sub-menu desse item
+3. Use Esquerda/Direita/Cima/Baixo para ajustar o valor
+4. Pressione Selecionar novamente para executar a ação e retornar ao menu principal
+
+**Nota:** O sistema de menu LCD mencionado acima não está implementado no código atual `PizzaController.ino`. Ele pode estar em uma versão separada ou em desenvolvimento.
 
 ## Recursos Avançados
 

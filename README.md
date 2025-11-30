@@ -1,6 +1,6 @@
-# PizzaController - ESP32 NEMA23 Stepper Motor Controller
+# PizzaController - ESP32 NEMA23 Stepper Motor Controller with AccelStepper
 
-This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32 microcontroller and a DM556 stepper driver. The program is configured for maximum microstepping (1/256) to achieve precise positioning control.
+This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32 microcontroller and a DM556 stepper driver. The program uses the AccelStepper library for smooth acceleration/deceleration and is configured for maximum microstepping (1/256) to achieve precise positioning control. It includes an LCD menu system for easy operation and has been optimized for better code maintainability using enums instead of magic numbers.
 
 ## Hardware Requirements
 
@@ -9,6 +9,7 @@ This project provides a complete Arduino sketch for controlling a NEMA23 stepper
 - DM556 Stepper Driver
 - Power Supply (appropriate for your motor and driver)
 - Connecting Wires
+- Optional: Home Limit Switch (active low)
 
 ## Wiring Connections
 
@@ -45,9 +46,10 @@ The DM556 driver uses DIP switches to configure microstepping and other settings
 
 1. Install the Arduino IDE
 2. Install the ESP32 board support in Arduino IDE
-3. Open `PizzaController.ino` in Arduino IDE
-4. Select the correct ESP32 board and port
-5. Upload the sketch
+3. Install the required libraries: AccelStepper, Preferences, Wire, LiquidCrystal_I2C
+4. Open `PizzaController_AccelStepper/PizzaController_AccelStepper.ino` in Arduino IDE
+5. Select the correct ESP32 board and port
+6. Upload the sketch
 
 ## Configuration
 
@@ -58,12 +60,7 @@ The program is configured for:
 
 ## Program Functionality
 
-The main program demonstrates basic stepper motor control by:
-1. Rotating the motor clockwise for half a revolution
-2. Pausing for 1 second
-3. Rotating counterclockwise for half a revolution
-4. Pausing for 1 second
-5. Repeating the cycle
+The program initializes the stepper motor controller and continuously monitors for serial commands to control the motor. It supports jogging, position management, homing, and testing functions. The motor can be controlled remotely via serial commands or programmatically using the provided functions.
 
 ## New Features Added
 
@@ -125,6 +122,9 @@ The program supports serial commands for remote control. Open the Serial Monitor
 - `SAVE_POS <num>`: Save the current position to slot 0-4 (e.g., `SAVE_POS 1`)
 - `LOAD_POS <num>`: Load position from slot 0-4 (e.g., `LOAD_POS 1`)
 - `GET_POS`: Get the current position
+- `TEST <steps>`: Start the test function with the specified number of steps (e.g., `TEST 1000`)
+- `RUN_TEST <steps>`: Start the test function with the specified number of steps (e.g., `RUN_TEST 1000`)
+- `STOP`: Stop the test function
 
 Any other input will respond with "Unknown command".
 
@@ -162,6 +162,44 @@ The program outputs status messages to the Serial Monitor at 115200 baud. Open t
 - Verify microstepping pins (MS1, MS2, MS3) are set correctly for 1/256 mode
 - Ensure adequate power supply voltage and current
 - Check Serial Monitor for initialization messages
+
+## Code Optimizations
+
+The code has been optimized for better maintainability and readability:
+
+- **Enum Usage:** Replaced magic numbers with descriptive enum values (`NONE`, `JOG`, `SPEED`, `ACCEL`, `SAVE_POS`, `GOTO`, `GOTO_SAVED`) for menu states
+- **AccelStepper Library:** Uses the AccelStepper library for smooth acceleration/deceleration instead of manual step timing
+- **Persistent Settings:** Motor parameters (steps per revolution, max speed, acceleration) are saved to non-volatile memory
+- **Modular Functions:** Code is organized into logical functions for better readability and maintenance
+
+## LCD Menu System
+
+The controller includes a user-friendly LCD menu system for easy operation without a computer. The 16x2 I2C LCD displays menu options, and a 5-button analog keypad allows navigation and input.
+
+### Menu Options
+
+1. **Jog**: Manually move the motor by entering the number of steps
+2. **Change Speed**: Adjust the maximum speed setting
+3. **Change Accel**: Adjust the acceleration setting
+4. **Home**: Move the motor to the home position (0)
+5. **Reset Home**: Set the current position as the new home (requires confirmation)
+6. **Save Position**: Save the current position to one of 5 slots (requires confirmation)
+7. **Go to Position**: Move to an absolute position (can be negative)
+8. **Go to Saved Position**: Load a saved position from one of 5 slots
+
+### Keypad Controls
+
+- **Up/Down**: Navigate through menu items
+- **Left/Right**: Adjust values in sub-menus (increment/decrement by 10)
+- **Up/Down in sub-menu**: Adjust values by 100
+- **Select**: Enter sub-menu or execute action
+
+### Menu Navigation
+
+1. Use Up/Down buttons to select a menu item
+2. Press Select to enter the sub-menu for that item
+3. Use Left/Right/Up/Down to adjust the value
+4. Press Select again to execute the action and return to the main menu
 
 ## Advanced Features
 

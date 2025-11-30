@@ -13,7 +13,7 @@
 \maketitle
 
 \section{Descrição do Sistema}
-Este documento apresenta o esquema de conexões para o controlador de motor de passo NEMA23 usando ESP32 e driver DM556.
+Este documento apresenta o esquema de conexões para o controlador de motor de passo NEMA23 usando ESP32 e driver DM556. O sistema inclui funcionalidades avançadas como homing com interruptor de limite, salvamento de posições e controle serial.
 
 \section{Esquema de Conexões}
 
@@ -33,6 +33,9 @@ Este documento apresenta o esquema de conexões para o controlador de motor de p
 % NEMA23 Motor
 \node [draw, rectangle, minimum width=2cm, minimum height=2cm, right=of dm556] (motor) {NEMA23 Motor};
 
+% Home Switch
+\node [draw, rectangle, minimum width=2cm, minimum height=1cm, below=of dm556, yshift=1cm] (home) {Interruptor de Limite (Home)};
+
 % ESP32 pins
 \node [left=of esp32, xshift=-1cm] (esp32_pins) {};
 \node [below=of esp32_pins, yshift=-0.5cm] {GPIO 18 (STEP)};
@@ -41,6 +44,7 @@ Este documento apresenta o esquema de conexões para o controlador de motor de p
 \node [below=of esp32_pins, yshift=-2cm] {GPIO 22 (MS1)};
 \node [below=of esp32_pins, yshift=-2.5cm] {GPIO 23 (MS2)};
 \node [below=of esp32_pins, yshift=-3cm] {GPIO 25 (MS3)};
+\node [below=of esp32_pins, yshift=-3.5cm] {GPIO 26 (HOME)};
 
 % Power connections
 \draw [->] (power) -- (dm556) node[midway, above] {+V, GND};
@@ -57,14 +61,21 @@ Este documento apresenta o esquema de conexões para o controlador de motor de p
 \draw [->] (dm556) -- (motor) node[midway, above] {A+, A-};
 \draw [->] (dm556) -- (motor) node[midway, below] {B+, B-};
 
+% ESP32 to Home Switch
+\draw [->] (esp32) -- (home) node[midway, left] {GPIO 26};
+
+% Home Switch to GND
+\draw [->] (home) -- ++(0,-1) node[midway, right] {GND};
+
 % Labels
 \node [below=of esp32, yshift=-0.5cm] {Microcontrolador};
 \node [below=of power, yshift=-0.5cm] {24-48V DC};
 \node [below=of dm556, yshift=-0.5cm] {Driver de Motor};
 \node [below=of motor, yshift=-0.5cm] {Motor de Passo};
+\node [below=of home, yshift=-0.5cm] {Interruptor de Limite (Ativo Baixo)};
 
 \end{tikzpicture}
-\caption{Esquema de conexões do sistema PizzaController}
+\caption{Esquema de conexões do sistema PizzaController com interruptor de limite}
 \label{fig:connections}
 \end{figure}
 
@@ -83,6 +94,10 @@ ESP32 & GPIO 21 & DM556 ENABLE (ativo baixo) \\
 ESP32 & GPIO 22 & DM556 MS1 \\
 ESP32 & GPIO 23 & DM556 MS2 \\
 ESP32 & GPIO 25 & DM556 MS3 \\
+ESP32 & GPIO 26 & Interruptor de Limite (ativo baixo, pull-up interno) \\
+ESP32 & GPIO 34 & Teclado Analógico (ADC) \\
+ESP32 & GPIO 21 & LCD SDA (I2C) \\
+ESP32 & GPIO 22 & LCD SCL (I2C) \\
 \hline
 Fonte de Alimentação & +V & DM556 +V (24-48V DC) \\
 Fonte de Alimentação & GND & DM556 GND \\
@@ -92,17 +107,42 @@ DM556 & A- & Motor A- (Fase A) \\
 DM556 & B+ & Motor B+ (Fase B) \\
 DM556 & B- & Motor B- (Fase B) \\
 \hline
+Interruptor de Limite & Terminal 1 & ESP32 GPIO 26 \\
+Interruptor de Limite & Terminal 2 & GND \\
+\hline
+LCD I2C & SDA & ESP32 GPIO 25 \\
+LCD I2C & SCL & ESP32 GPIO 26 \\
+LCD I2C & VCC & 5V \\
+LCD I2C & GND & GND \\
+\hline
+Teclado Analógico & Sinal & ESP32 GPIO 34 \\
+Teclado Analógico & VCC & 5V \\
+Teclado Analógico & GND & GND \\
+\hline
 \end{tabular}
 \end{table}
+
+\section{Configuração do DM556}
+
+O driver DM556 deve ser configurado com os seguintes DIP switches para microstepping 1/256:
+
+\begin{itemize}
+\item SW1 (MS1): ON
+\item SW2 (MS2): ON
+\item SW3 (MS3): ON
+\item SW4-SW8: Consulte o manual do DM556 para corrente e outras configurações (geralmente OFF para padrão)
+\end{itemize}
 
 \section{Notas Importantes}
 
 \begin{itemize}
 \item Verifique a polaridade da fonte de alimentação antes de conectar
-\item As conexões ENABLE são ativas baixas (LOW = habilitado)
+\item As conexões ENABLE e HOME são ativas baixas (LOW = habilitado/acionado)
 \item Ajuste os pinos GPIO no código se a fiação for diferente
 \item Garanta que a corrente da fonte seja adequada para o motor NEMA23
 \item Use cabos de boa qualidade para evitar interferências
+\item O interruptor de limite deve ser conectado com pull-up interno do ESP32
+\item Para homing, mova o motor na direção apropriada até o interruptor ser acionado
 \end{itemize}
 
 \end{document}

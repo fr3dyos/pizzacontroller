@@ -10,25 +10,29 @@
 
 // Step 2: Define pin connections for ESP32 to DM556 driver
 // These pins are GPIO pins on ESP32. Adjust based on your wiring.
-#define STEP_PIN 18      // Connect to STEP input on DM556
-#define DIR_PIN 19       // Connect to DIR input on DM556
-#define ENABLE_PIN 21    // Connect to ENABLE input on DM556 (active low)
-#define MS1_PIN 22       // Connect to MS1 on DM556 for microstepping
-#define MS2_PIN 23       // Connect to MS2 on DM556
-#define MS3_PIN 25       // Connect to MS3 on DM556
-#define HOME_SWITCH_PIN 26 // Connect to home limit switch (active low)
+#define STEP_PIN        18  // Connect to STEP input on DM556
+#define DIR_PIN         19  // Connect to DIR input on DM556
+#define ENABLE_PIN      21  // Connect to ENABLE input on DM556 (active low)
+#define MS1_PIN         22  // Connect to MS1 on DM556 for microstepping
+#define MS2_PIN         23  // Connect to MS2 on DM556
+#define MS3_PIN         25  // Connect to MS3 on DM556
+#define HOME_SWITCH_PIN 26  // Connect to home limit switch (active low)
 
 // Step 3: Define motor parameters
 // NEMA23 typically has 200 steps per revolution (full step).
 // With 1/256 microstepping, total steps per revolution = 200 * 256 = 51200
-const int STEPS_PER_REV = 400;  // Steps per revolution at 1/256 microstep
-const int SPEED_DELAY = 500;      // Delay between steps in microseconds (adjust for speed)
+const int STEPS_PER_REV = 400;   // Steps per revolution at 1/256 microstep
+const int SPEED_DELAY   = 500;   // Delay between steps in microseconds (adjust for speed)
 
 // Step 3.1: Global variables for position tracking
-long currentPosition = 0;         // Current position in steps from home
-long homePosition = 0;            // Home position offset
-long savedPositions[5] = {0};     // Array for up to 5 saved positions
-Preferences preferences;          // For saving positions to flash memory
+long currentPosition     = 0;         // Current position in steps from home
+long homePosition        = 0;         // Home position offset
+long savedPositions[5]   = {0};       // Array for up to 5 saved positions
+Preferences preferences;              // For saving positions to flash memory
+
+// Step 3.2: Global variables for test function
+bool isTesting = false;  // Flag to indicate if test is running
+long testSteps = 0;      // Number of steps for test
 
 // Step 4: Setup function - runs once at startup
 void setup() {
@@ -78,6 +82,11 @@ void loop() {
     command.trim();
     processCommand(command);
   }
+
+  // Run test function if active
+  if (isTesting) {
+    runTest();
+  }
 }
 
 // Process serial commands
@@ -105,6 +114,14 @@ void processCommand(String command) {
     Serial.println(currentPosition);
   } else if (command == "FIND_HOME") {
     findHome();
+  } else if (command.startsWith("TEST ")) {
+    long steps = command.substring(5).toInt();
+    startTest(steps);
+  } else if (command == "STOP") {
+    stopTest();
+  } else if (command.startsWith("RUN_TEST ")) {
+    long steps = command.substring(9).toInt();
+    startTest(steps);
   } else {
     Serial.println("Unknown command");
   }
@@ -123,7 +140,9 @@ void moveSteps(long steps, bool direction) {
     digitalWrite(STEP_PIN, LOW);
     delayMicroseconds(SPEED_DELAY);
   }
-  digitalWrite(ENABLE_PIN, HIGH);  // Disable driver after moving to prevent overheating
+  if (!isTesting) {
+    digitalWrite(ENABLE_PIN, HIGH);  // Disable driver after moving to prevent overheating (unless testing)
+  }
   // Update current position
   currentPosition += direction ? steps : -steps;
   preferences.putLong("currPos", currentPosition);  // Save current position after every move
@@ -164,10 +183,10 @@ void savePosition(int num) {
 // Load position from a numbered slot
 void loadPosition(int num) {
   if (num >= 0 && num < 5) {
-    long targetPos = savedPositions[num];
+    long targetPos   = savedPositions[num];
     long stepsToMove = targetPos - currentPosition;
-    bool direction = (stepsToMove > 0) ? true : false;
-    long absSteps = abs(stepsToMove);
+    bool direction   = (stepsToMove > 0) ? true : false;
+    long absSteps    = abs(stepsToMove);
     moveSteps(absSteps, direction);
     Serial.println(currentPosition);
   }
@@ -176,8 +195,8 @@ void loadPosition(int num) {
 // Move to absolute position
 void moveToPosition(long targetPosition) {
   long stepsToMove = targetPosition - currentPosition;
-  bool direction = (stepsToMove > 0) ? true : false;
-  long absSteps = abs(stepsToMove);
+  bool direction   = (stepsToMove > 0) ? true : false;
+  long absSteps    = abs(stepsToMove);
   Serial.print("Moving to absolute position ");
   Serial.print(targetPosition);
   Serial.print(": ");
@@ -191,8 +210,8 @@ void moveToPosition(long targetPosition) {
 // Assumes home is at current position when called, or implement limit switch logic
 void home() {
   long stepsToHome = -currentPosition;  // Steps needed to reach home (0)
-  bool direction = (stepsToHome > 0) ? true : false;  // true = clockwise if positive
-  long absSteps = abs(stepsToHome);
+  bool direction   = (stepsToHome > 0) ? true : false;  // true = clockwise if positive
+  long absSteps    = abs(stepsToHome);
 
   Serial.print("Homing: moving ");
   Serial.print(absSteps);
@@ -275,4 +294,37 @@ void demoSaveAndHome() {
 
   // Reset home at current position
   resetHome();
+}
+
+// Test function: Goes forward N steps and then backwards N steps, stops only when STOP command is received
+void startTest(long steps) {
+  if (steps > 0) {
+    testSteps = steps;
+    isTesting = true;
+    Serial.print("Starting test with ");
+    Serial.print(testSteps);
+    Serial.println(" steps");
+  } else {
+    Serial.println("Invalid number of steps for test");
+  }
+}
+
+void stopTest() {
+  isTesting = false;
+  Serial.println("Test stopped");
+}
+
+void runTest() {
+  static bool direction = true;  // true = forward (clockwise), false = backward (counterclockwise)
+
+  // Calculate target position
+  long targetPosition = direction ? testSteps : -testSteps;
+
+  // Move to target position
+  moveToPosition(targetPosition);
+
+  // Toggle direction for next cycle
+  direction = !direction;
+  Serial.print("Changing direction to ");
+  Serial.println(direction ? "forward" : "backward");
 }
