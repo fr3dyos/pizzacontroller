@@ -23,6 +23,14 @@ Connect the ESP32 to the DM556 driver as follows:
 - ESP32 GPIO 25 → DM556 MS3
 - ESP32 GPIO 26 → Home Limit Switch (active low, connect one terminal to GPIO 26 and the other to GND)
 
+### Direct Position Buttons
+
+- ESP32 GPIO 12 → Direct Position Button 1 (active low, connect to GND, loads position 0)
+- ESP32 GPIO 13 → Direct Position Button 2 (active low, connect to GND, loads position 1)
+- ESP32 GPIO 14 → Direct Position Button 3 (active low, connect to GND, loads position 2)
+- ESP32 GPIO 15 → Direct Position Button 4 (active low, connect to GND, loads position 3)
+- ESP32 GPIO 16 → Direct Position Button 5 (active low, connect to GND, loads position 4)
+
 ### DM556 DIP Switch Configuration
 
 The DM556 driver uses DIP switches to configure microstepping and other settings. For this project (1/256 microstepping), set the switches as follows:

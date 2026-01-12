@@ -6,6 +6,11 @@ This document lists the GPIO pins used by the PizzaController project on the ESP
 
 | GPIO Pin | Function | Connected To | Notes |
 |----------|----------|--------------|-------|
+| GPIO 12 | BUTTON1_PIN | Direct Position Button 1 | Active low input, loads position 0 |
+| GPIO 13 | BUTTON2_PIN | Direct Position Button 2 | Active low input, loads position 1 |
+| GPIO 14 | BUTTON3_PIN | Direct Position Button 3 | Active low input, loads position 2 |
+| GPIO 15 | BUTTON4_PIN | Direct Position Button 4 | Active low input, loads position 3 |
+| GPIO 16 | BUTTON5_PIN | Direct Position Button 5 | Active low input, loads position 4 |
 | GPIO 18 | STEP | DM556 Driver STEP input | Pulse signal for stepper motor steps |
 | GPIO 19 | DIR | DM556 Driver DIR input | Direction control (HIGH = clockwise, LOW = counterclockwise) |
 | GPIO 21 | ENABLE | DM556 Driver ENABLE input | Active low enable signal |

@@ -22,6 +22,14 @@ Conecte o ESP32 ao driver DM556 da seguinte forma:
 - ESP32 GPIO 25 → DM556 MS3
 - ESP32 GPIO 26 → Interruptor de Limite de Home (ativo baixo, conecte um terminal ao GPIO 26 e o outro ao GND)
 
+### Botões de Posição Direta
+
+- ESP32 GPIO 12 → Botão de Posição Direta 1 (ativo baixo, conecte ao GND, carrega posição 0)
+- ESP32 GPIO 13 → Botão de Posição Direta 2 (ativo baixo, conecte ao GND, carrega posição 1)
+- ESP32 GPIO 14 → Botão de Posição Direta 3 (ativo baixo, conecte ao GND, carrega posição 2)
+- ESP32 GPIO 15 → Botão de Posição Direta 4 (ativo baixo, conecte ao GND, carrega posição 3)
+- ESP32 GPIO 16 → Botão de Posição Direta 5 (ativo baixo, conecte ao GND, carrega posição 4)
+
 ### Configuração dos Interruptores DIP do DM556
 
 O driver DM556 usa interruptores DIP para configurar microstepping e outras configurações. Para este projeto (microstepping 1/256), configure os interruptores da seguinte forma:

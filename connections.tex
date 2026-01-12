@@ -36,15 +36,23 @@ Este documento apresenta o esquema de conexões para o controlador de motor de p
 % Home Switch
 \node [draw, rectangle, minimum width=2cm, minimum height=1cm, below=of dm556, yshift=1cm] (home) {Interruptor de Limite (Home)};
 
+% Direct Buttons
+\node [draw, rectangle, minimum width=2cm, minimum height=2cm, right=of home] (buttons) {Botões de Posição Direta};
+
 % ESP32 pins
 \node [left=of esp32, xshift=-1cm] (esp32_pins) {};
-\node [below=of esp32_pins, yshift=-0.5cm] {GPIO 18 (STEP)};
-\node [below=of esp32_pins, yshift=-1cm] {GPIO 19 (DIR)};
-\node [below=of esp32_pins, yshift=-1.5cm] {GPIO 21 (ENABLE)};
-\node [below=of esp32_pins, yshift=-2cm] {GPIO 22 (MS1)};
-\node [below=of esp32_pins, yshift=-2.5cm] {GPIO 23 (MS2)};
-\node [below=of esp32_pins, yshift=-3cm] {GPIO 25 (MS3)};
-\node [below=of esp32_pins, yshift=-3.5cm] {GPIO 26 (HOME)};
+\node [below=of esp32_pins, yshift=-0.5cm] {GPIO 12 (Botão 1)};
+\node [below=of esp32_pins, yshift=-1cm] {GPIO 13 (Botão 2)};
+\node [below=of esp32_pins, yshift=-1.5cm] {GPIO 14 (Botão 3)};
+\node [below=of esp32_pins, yshift=-2cm] {GPIO 15 (Botão 4)};
+\node [below=of esp32_pins, yshift=-2.5cm] {GPIO 16 (Botão 5)};
+\node [below=of esp32_pins, yshift=-3cm] {GPIO 18 (STEP)};
+\node [below=of esp32_pins, yshift=-3.5cm] {GPIO 19 (DIR)};
+\node [below=of esp32_pins, yshift=-4cm] {GPIO 21 (ENABLE)};
+\node [below=of esp32_pins, yshift=-4.5cm] {GPIO 22 (MS1)};
+\node [below=of esp32_pins, yshift=-5cm] {GPIO 23 (MS2)};
+\node [below=of esp32_pins, yshift=-5.5cm] {GPIO 25 (MS3)};
+\node [below=of esp32_pins, yshift=-6cm] {GPIO 26 (HOME)};
 
 % Power connections
 \draw [->] (power) -- (dm556) node[midway, above] {+V, GND};

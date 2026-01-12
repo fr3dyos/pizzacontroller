@@ -1,6 +1,7 @@
-# TODO for Jog Submenu Implementation
-
-- [ ] Add JOG_STEPS constant (10 steps per button press)
-- [ ] Modify updateMenuDisplay() for subMenuType 1 to show "Jog Mode" and button instructions
-- [ ] Modify handleMenu() for subMenuType 1: left jog backward, right jog forward, select exit, up/down do nothing
-- [ ] Test menu navigation and motor movement
+- Reorder menuItems to make "Go to Saved Pos" the first item
+- Add defines for 5 new button pins (12-16)
+- Add global variables for button debouncing
+- Configure new button pins in setup
+- Add handleDirectButtons function
+- Call handleDirectButtons in loop
+- Update updateMenuDisplay to show saved positions when not in submenu

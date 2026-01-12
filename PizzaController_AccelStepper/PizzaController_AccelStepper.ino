@@ -38,7 +38,14 @@
 #define LCD_COLS 16
 #define LCD_ROWS 2
 LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
-#define KEYPAD_PIN 34    // Analog pin for 5-button Adkeypad
+#define KEYPAD_PIN 35    // Analog pin for 5-button Adkeypad
+
+// Direct position buttons (digital pins)
+#define BUTTON1_PIN 12   // Button 1 -> position 0
+#define BUTTON2_PIN 13   // Button 2 -> position 1
+#define BUTTON3_PIN 14   // Button 3 -> position 2
+#define BUTTON4_PIN 15   // Button 4 -> position 3
+#define BUTTON5_PIN 16   // Button 5 -> position 4
 
 // Enum for submenu types
 enum SubMenu {
@@ -77,7 +84,7 @@ long testSteps = 0;               // Number of steps for test
 // Step 3.4: Menu variables
 int menuIndex = 0;                // Current menu item index
 int menuSize = 8;                 // Number of menu items
-String menuItems[8] = {"Jog", "Change Speed", "Change Accel", "Home", "Reset Home", "Save Position", "Go to Pos", "Go to Saved Pos"};
+String menuItems[8] = {"Go to Saved Pos", "Jog", "Change Speed", "Change Accel", "Home", "Reset Home", "Save Position", "Go to Pos"};
 bool inSubMenu = false;           // Flag for sub-menu
 SubMenu subMenuType = NONE;       // Type of sub-menu
 long inputValue = 0;              // For numeric input in sub-menus
@@ -85,6 +92,10 @@ bool inputDirection = true;       // For jog direction
 int lastKey = -1;                 // Last key pressed
 unsigned long lastKeyTime = 0;    // Time of last key press
 const unsigned long debounceDelay = 200; // Debounce delay in ms
+
+// Direct button variables (active low)
+int lastButtonStates[5] = {HIGH, HIGH, HIGH, HIGH, HIGH};
+unsigned long lastButtonTimes[5] = {0, 0, 0, 0, 0};
 
 // Step 3.3: AccelStepper object
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
@@ -98,6 +109,11 @@ void setup() {
   // Step 4.1: Set pin modes
   pinMode(ENABLE_PIN, OUTPUT);
   pinMode(HOME_SWITCH_PIN, INPUT_PULLUP);  // Home switch with internal pull-up
+  pinMode(BUTTON1_PIN, INPUT_PULLUP);
+  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(BUTTON3_PIN, INPUT_PULLUP);
+  pinMode(BUTTON4_PIN, INPUT_PULLUP);
+  pinMode(BUTTON5_PIN, INPUT_PULLUP);
 
   // Step 4.2: Configure microstepping to 1/128 (as per DM556 driver setup)
   // DM556 microstep settings: MS1=0, MS2=1, MS3=1 for 1/128
@@ -158,7 +174,7 @@ void setup() {
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
-  lcd.print("PizzaController");
+  lcd.print("Pizza Controller");
   lcd.setCursor(0, 1);
   lcd.print("Ready");
   delay(2000);
@@ -176,13 +192,16 @@ void loop() {
   // Handle menu input
   handleMenu();
 
+  // Handle direct position buttons
+  handleDirectButtons();
+
   // Run stepper
-  stepper.run();
 
   // Run test function if active
   if (isTesting) {
     runTestAccel();
   }
+  delay(250);
 }
 
 // Process serial commands
@@ -471,17 +490,38 @@ void runTestAccel() {
   }
 }
 
+// Function to handle direct position buttons
+void handleDirectButtons() {
+  int buttonPins[5] = {BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN, BUTTON4_PIN, BUTTON5_PIN};
+  unsigned long currentTime = millis();
+
+  for (int i = 0; i < 5; i++) {
+    int buttonState = digitalRead(buttonPins[i]);
+    if (buttonState == LOW && lastButtonStates[i] == HIGH && currentTime - lastButtonTimes[i] > debounceDelay) {
+      // Button pressed (active low)
+      Serial.print("Direct button ");
+      Serial.print(i + 1);
+      Serial.println(" pressed");
+      loadPosition(i);
+      lastButtonTimes[i] = currentTime;
+    }
+    lastButtonStates[i] = buttonState;
+  }
+}
+
 // Step 7: LCD and Keypad functions
 
 // Function to read keypad
 
 int readKeypad() {
   int adcValue = analogRead(KEYPAD_PIN);
+  Serial.print(adcValue);
+  Serial.println(" ");
   if (adcValue < 100) return 4; // Left
   if (adcValue < 800) return 2; // Up
-  if (adcValue < 1800) return 3; // Down
-  if (adcValue < 2700) return 1; // Right
-  if (adcValue < 4000) return 5; // Select
+  if (adcValue < 1500) return 3; // Down
+  if (adcValue < 2100) return 1; // Right
+  if (adcValue < 3200) return 5; // Select
   if (adcValue > 4000) return 0; // No button
   return 0; // No button
 }
