@@ -6,6 +6,26 @@
 // Optimized Version: January 28, 2026
 // Optimizations: Switched to FastAccelStepper for better performance, added analog keypad for direct buttons, improved interrupt handling
 
+// Serial Commands:
+// - JOG F <steps>: Jog forward (clockwise) by <steps> steps
+// - JOG B <steps>: Jog backward (counterclockwise) by <steps> steps
+// - MOVE_TO <position>: Move to absolute position <position>
+// - HOME: Move to home position (0)
+// - RESET_HOME: Set current position as new home
+// - SAVE_POS <num>: Save current position to slot <num> (0-4)
+// - LOAD_POS <num>: Load position from slot <num>
+// - GET_POS: Print current position
+// - FIND_HOME: Find home using limit switch (non-blocking)
+// - TEST <steps>: Start continuous test with <steps> steps
+// - STOP: Stop the test
+// - SET_STEPS <value>: Set steps per revolution and save to memory
+// - SET_MAX_SPEED <value>: Set maximum speed and save to memory (0 < value <= 50000)
+// - SET_ACCELERATION <value>: Set acceleration and save to memory (0 < value <= 50000)
+// - SET_HOLD_TIME <ms>: Set motor hold time after move (0-10000 ms)
+// - SET_SPEED <value>: Set homing speed and save to memory (0 < value <= 50000)
+// - GET_INFO: Display motor configuration (steps, speed, acceleration, hold time)
+// - GET_SWITCH: Read home limit switch status
+
 // ============================================================================
 // INCLUDES
 // ============================================================================
@@ -734,22 +754,54 @@ void handleDirectButtons() {
 // LCD AND KEYPAD
 // ============================================================================
 int readKeypad() {
-  int adcValue = analogRead(KEYPAD_PIN);
-  if (adcValue < 100)  return 4;
-  if (adcValue < 800)  return 2;
-  if (adcValue < 1500) return 3;
-  if (adcValue < 2100) return 1;
-  if (adcValue < 3200) return 5;
+  static int readings[3] = {0, 0, 0};
+  static int index = 0;
+
+  // Read current value
+  int currentReading = analogRead(KEYPAD_PIN);
+
+  // Update readings array
+  readings[index] = currentReading;
+  index = (index + 1) % 3;
+
+  // Calculate average
+  int sum = readings[0] + readings[1] + readings[2];
+  int avgValue = sum / 3;
+
+  // Determine button based on averaged value
+  if (avgValue < 100)  return 4;
+  if (avgValue < 800)  return 2;
+  if (avgValue < 1500) return 3;
+  if (avgValue < 2100) return 1;
+  if (avgValue < 3200) return 5;
   return 0;
 }
 
 int readDirectKeypad() {
-  int adcValue = analogRead(DIRECT_KEYPAD_PIN);
-  if (adcValue < 100)  return 5;
-  if (adcValue < 2250) return 4;
-  if (adcValue < 2750) return 3;
-  if (adcValue < 3050) return 2;
-  if (adcValue < 3500) return 1;
+  static int readings[3] = {0, 0, 0};
+  static int index = 0;
+
+  // Read current value
+  int currentReading = analogRead(DIRECT_KEYPAD_PIN);
+
+  // Update readings array
+  readings[index] = currentReading;
+  index = (index + 1) % 3;
+
+  // Calculate average
+  int sum = readings[0] + readings[1] + readings[2];
+  int avgValue = sum / 3;
+
+  // Debug output
+  //Serial.print("direct: ");
+  //Serial.println(avgValue);
+
+  // Determine button based on averaged value
+  if (avgValue < 100)  return 5;
+  if (avgValue < 2250) return 4;
+  if (avgValue < 2750) return 3;
+  if (avgValue < 3050) return 2;
+  if (avgValue < 3600) return 1;
   return 0;
 }
 
