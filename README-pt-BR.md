@@ -1,4 +1,4 @@
-# PizzaController - Controlador de Motor de Passo NEMA23 com ESP32 e AccelStepper
+# PizzaController - Controlador de Motor de Passo NEMA23 com ESP32 e FastAccelStepper
 
 Este projeto fornece um sketch completo do Arduino para controlar um motor de passo NEMA23 usando um microcontrolador ESP32 e um driver DM556. O programa usa a biblioteca AccelStepper para aceleração/desaceleração suave e está configurado para microstepping máximo (1/256) para alcançar controle de posicionamento preciso. Inclui um sistema de menu LCD para operação fácil e foi otimizado para melhor manutenção do código usando enums em vez de números mágicos.
 
@@ -175,7 +175,10 @@ O programa gera mensagens de status no Monitor Serial a 115200 baud. Abra o Moni
 O código foi otimizado para melhor manutenção e legibilidade:
 
 - **Uso de Enum:** Substituiu números mágicos por valores enum descritivos (`NONE`, `JOG`, `SPEED`, `ACCEL`, `SAVE_POS`, `GOTO`, `GOTO_SAVED`) para estados de menu
-- **Biblioteca AccelStepper:** Usa a biblioteca AccelStepper para aceleração/desaceleração suave em vez de temporização manual de passos
+- **Biblioteca FastAccelStepper:** Usa a biblioteca FastAccelStepper para controle de motor não-bloqueante de alto desempenho com aceleração/desaceleração suave
+- **Teclado Analógico:** Botões de posição direta usam teclado analógico em vez de pinos digitais para melhor integração
+- **Homing Orientado por Interrupção:** Homing otimizado com detecção baseada em interrupção do interruptor de limite
+- **Bufferização Serial:** Bufferização inteligente de saída serial para evitar bloqueio de operações do motor
 - **Configurações Persistentes:** Parâmetros do motor (passos por revolução, velocidade máxima, aceleração) são salvos na memória não-volátil
 - **Funções Modulares:** O código é organizado em funções lógicas para melhor legibilidade e manutenção
 

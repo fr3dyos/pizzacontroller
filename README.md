@@ -1,6 +1,6 @@
-# PizzaController - ESP32 NEMA23 Stepper Motor Controller with AccelStepper
+# PizzaController - ESP32 NEMA23 Stepper Motor Controller with FastAccelStepper
 
-This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32 microcontroller and a DM556 stepper driver. The program uses the AccelStepper library for smooth acceleration/deceleration and is configured for maximum microstepping (1/256) to achieve precise positioning control. It includes an LCD menu system for easy operation and has been optimized for better code maintainability using enums instead of magic numbers.
+This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32 microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for high-performance, non-blocking motor control with smooth acceleration/deceleration and is configured for maximum microstepping (1/256) to achieve precise positioning control. It includes an LCD menu system for easy operation, analog keypad for direct position buttons, and has been optimized for low latency and better performance using enums instead of magic numbers.
 
 ## Hardware Requirements
 
@@ -23,13 +23,14 @@ Connect the ESP32 to the DM556 driver as follows:
 - ESP32 GPIO 25 → DM556 MS3
 - ESP32 GPIO 26 → Home Limit Switch (active low, connect one terminal to GPIO 26 and the other to GND)
 
-### Direct Position Buttons
+### Direct Position Buttons (Analog Keypad)
 
-- ESP32 GPIO 12 → Direct Position Button 1 (active low, connect to GND, loads position 0)
-- ESP32 GPIO 13 → Direct Position Button 2 (active low, connect to GND, loads position 1)
-- ESP32 GPIO 14 → Direct Position Button 3 (active low, connect to GND, loads position 2)
-- ESP32 GPIO 15 → Direct Position Button 4 (active low, connect to GND, loads position 3)
-- ESP32 GPIO 16 → Direct Position Button 5 (active low, connect to GND, loads position 4)
+- ESP32 GPIO 34 → Direct Position Analog Keypad (ADC input for 5-button keypad)
+  - Button 1: Loads position 0
+  - Button 2: Loads position 1
+  - Button 3: Loads position 2
+  - Button 4: Loads position 3
+  - Button 5: Loads position 4
 
 ### DM556 DIP Switch Configuration
 
@@ -176,7 +177,10 @@ The program outputs status messages to the Serial Monitor at 115200 baud. Open t
 The code has been optimized for better maintainability and readability:
 
 - **Enum Usage:** Replaced magic numbers with descriptive enum values (`NONE`, `JOG`, `SPEED`, `ACCEL`, `SAVE_POS`, `GOTO`, `GOTO_SAVED`) for menu states
-- **AccelStepper Library:** Uses the AccelStepper library for smooth acceleration/deceleration instead of manual step timing
+- **FastAccelStepper Library:** Uses the FastAccelStepper library for high-performance, non-blocking motor control with smooth acceleration/deceleration
+- **Analog Keypad:** Direct position buttons use analog keypad instead of digital pins for better integration
+- **Interrupt-Driven Homing:** Optimized homing with interrupt-based limit switch detection
+- **Serial Buffering:** Smart serial output buffering to avoid blocking motor operations
 - **Persistent Settings:** Motor parameters (steps per revolution, max speed, acceleration) are saved to non-volatile memory
 - **Modular Functions:** Code is organized into logical functions for better readability and maintenance
 

@@ -1,8 +1,9 @@
-// PizzaController_AccelStepper.ino - FINAL COMPLETE VERSION
+// PizzaController_AccelStepper.ino - FIXED & IMPROVED VERSION
 // ESP32 Program to Control NEMA23 Stepper Motor with DM556 Driver using AccelStepper Library
-// Features: Non-blocking motor control, anti-overheating, position saving, LCD menu
+// Features: Non-blocking motor control, anti-overheating, position saving, LCD menu, motor configuration retrieval, limit switch status
 // Original Author: Eng. Fredy Osorio <ing.fredyosorio@gmail.com>
-// Final Version: January 20, 2026
+// Fixed Version: January 22, 2026
+// Fixes: All 10 issues from code review addressed
 
 // Serial Commands:
 // - JOG F <steps>: Jog forward (clockwise) by <steps> steps
@@ -13,13 +14,16 @@
 // - SAVE_POS <num>: Save current position to slot <num> (0-4)
 // - LOAD_POS <num>: Load position from slot <num>
 // - GET_POS: Print current position
-// - FIND_HOME: Find home using limit switch
+// - FIND_HOME: Find home using limit switch (non-blocking)
 // - TEST <steps>: Start continuous test with <steps> steps
 // - STOP: Stop the test
 // - SET_STEPS <value>: Set steps per revolution and save to memory
-// - SET_MAX_SPEED <value>: Set maximum speed and save to memory
-// - SET_ACCELERATION <value>: Set acceleration and save to memory
-// - SET_HOLD_TIME <ms>: Set motor hold time after move (default 500ms)
+// - SET_MAX_SPEED <value>: Set maximum speed and save to memory (0 < value <= 50000)
+// - SET_ACCELERATION <value>: Set acceleration and save to memory (0 < value <= 50000)
+// - SET_HOLD_TIME <ms>: Set motor hold time after move (0-10000 ms)
+// - SET_SPEED <value>: Set homing speed and save to memory (0 < value <= 50000)
+// - GET_INFO: Display motor configuration (steps, speed, acceleration, hold time)
+// - GET_SWITCH: Read home limit switch status
 
 // ============================================================================
 // INCLUDES
@@ -56,28 +60,37 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 // ============================================================================
 enum SubMenu {
   NONE,
-  GOTO_SAVED,
-  SPEED,
-  ACCEL,
-  HOME,
-  RESET_HOME,
-  SAVE_POS,
-  GOTO,
-  JOG,
+  GOTO_SAVED,      // menuItems[0]
+  SPEED,           // menuItems[1]
+  ACCEL,           // menuItems[2]
+  HOME_SELECT,     // menuItems[3] - renamed to avoid conflict
+  RESET_HOME,      // menuItems[4]
+  SAVE_POS,        // menuItems[5]
+  GOTO,            // menuItems[6]
+  JOG,             // menuItems[7]
   CONFIRM_RESET_HOME,
   CONFIRM_SAVE_POS
+};
+
+enum HomingState {
+  HOMING_IDLE,
+  HOMING_MOVING,
+  HOMING_DONE
 };
 
 // ============================================================================
 // MOTOR CONFIGURATION
 // ============================================================================
-int STEPS_PER_REV = 3200;  // Default steps per revolution (configurable)
-float MAX_SPEED = 8000.0;   // Maximum speed in steps per second
-float ACCELERATION = 4000.0; // Acceleration in steps per second squared
-int JOG_STEPS = 50;         // Steps per button press in jog submenu
+int STEPS_PER_REV = 3200;      // Default steps per revolution (configurable)
+float MAX_SPEED = 8000.0;      // Maximum speed in steps per second
+float ACCELERATION = 4000.0;   // Acceleration in steps per second squared
+float HOMING_SPEED = 2000.0;   // Speed for homing in steps per second
+int JOG_STEPS = 50;            // Steps per button press in jog submenu
 
 const long MAX_JOG_STEPS = 50000;  // Safety limit for jog steps
 const long MAX_POSITION = 1000000; // Safety limit for absolute positions
+const float MAX_SPEED_LIMIT = 50000.0;
+const float MAX_ACCEL_LIMIT = 50000.0;
 
 // Motor hold time after movement (prevents overheating)
 unsigned long MOTOR_HOLD_TIME = 300;  // Time in ms to keep motor enabled after move
@@ -90,6 +103,10 @@ bool motorShouldDisable = false;       // Flag: motor should be disabled soon
 bool isMotorMoving = false;    // Flag: motor is currently moving
 long motorTargetPosition = 0;  // Target position for current movement
 unsigned long motorMoveStartTime = 0; // Time when movement started
+
+// Homing state machine (FIXED: Now non-blocking)
+HomingState homingState = HOMING_IDLE;
+unsigned long homingStartTime = 0;
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -106,7 +123,7 @@ bool testDirection = true;        // Current direction in test
 
 // Menu variables
 int menuIndex = 0;                // Current menu item index
-int menuSize = 8;                 // Number of menu items
+const int menuSize = 8;           // Number of menu items
 String menuItems[8] = {"Go to Saved Pos", "Change Speed", "Change Accel", "Home", "Reset Home", "Save Position", "Go to Pos", "Jog"};
 bool inSubMenu = false;           // Flag for sub-menu
 SubMenu subMenuType = NONE;       // Type of sub-menu
@@ -136,6 +153,8 @@ void updateMotorMovement();
 void disableMotor();
 void enableMotor();
 void scheduleMotorDisable();
+void updateHomingState();
+void startFindHome();
 
 // ============================================================================
 // SETUP FUNCTION
@@ -162,7 +181,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println("\n\n========================================");
-  Serial.println("Pizza Controller - FINAL VERSION");
+  Serial.println("Pizza Controller - FIXED VERSION");
   Serial.println("========================================");
   Serial.println("Features:");
   Serial.println("- Non-blocking motor control");
@@ -170,6 +189,7 @@ void setup() {
   Serial.println("- 5 saved position slots");
   Serial.println("- LCD menu with keypad");
   Serial.println("- Non-volatile memory storage");
+  Serial.println("- Non-blocking homing");
   Serial.println("========================================\n");
   
   Serial.println("Available Serial Commands:");
@@ -185,10 +205,12 @@ void setup() {
   Serial.println("  TEST <steps>            - Start continuous test");
   Serial.println("  STOP                    - Stop test");
   Serial.println("  SET_STEPS <value>       - Configure steps/revolution");
-  Serial.println("  SET_MAX_SPEED <value>   - Set max speed (steps/sec)");
-  Serial.println("  SET_ACCELERATION <val>  - Set acceleration");
+  Serial.println("  SET_MAX_SPEED <value>   - Set max speed (0 < val <= 50000)");
+  Serial.println("  SET_ACCELERATION <val>  - Set acceleration (0 < val <= 50000)");
   Serial.println("  SET_HOLD_TIME <ms>      - Motor hold time (0-10000)");
+  Serial.println("  SET_SPEED <value>       - Set homing speed (0 < val <= 50000)");
   Serial.println("  GET_INFO                - Display motor configuration");
+  Serial.println("  GET_SWITCH              - Read home limit switch status");
   Serial.println("========================================\n");
 
   // Load configuration from non-volatile memory
@@ -199,6 +221,7 @@ void setup() {
   MAX_SPEED = preferences.getFloat("maxSpeed", 3000.0);
   ACCELERATION = preferences.getFloat("acceleration", 1000.0);
   MOTOR_HOLD_TIME = preferences.getULong("holdTime", 500);
+  HOMING_SPEED = preferences.getFloat("homingSpeed", 2000.0); // FIXED: Now loads HOMING_SPEED
   
   stepper.setMaxSpeed(MAX_SPEED);
   stepper.setAcceleration(ACCELERATION);
@@ -218,6 +241,8 @@ void setup() {
   Serial.println(MAX_SPEED);
   Serial.print("Acceleration: ");
   Serial.println(ACCELERATION);
+  Serial.print("Homing speed: ");
+  Serial.println(HOMING_SPEED);
   Serial.print("Motor hold time: ");
   Serial.print(MOTOR_HOLD_TIME);
   Serial.println(" ms\n");
@@ -247,20 +272,23 @@ void loop() {
     if (command.length() > 0) {
       processCommand(command);      
       currentPosition = stepper.currentPosition();
-      updateMenuDisplay();
+      updateMenuDisplay();  // FIXED: Single update point
     }
   }
 
   // Handle menu and button input
   handleMenu();
   handleDirectButtons();
-
+  
   // CRITICAL: stepper.run() must be called frequently for smooth motion
   stepper.run();
   
   // Update motor movement state (non-blocking)
   updateMotorMovement();
 
+  // FIXED: Non-blocking homing state machine
+  updateHomingState();
+  
   // Auto-disable motor after hold time expires (anti-overheating)
   if (motorShouldDisable && millis() >= motorDisableTime) {
     disableMotor();
@@ -283,21 +311,61 @@ void loop() {
 void enableMotor() {
   digitalWrite(ENABLE_PIN, LOW);
   motorShouldDisable = false;
-  Serial.println("[Motor ENABLED]");
 }
 
 void disableMotor() {
   digitalWrite(ENABLE_PIN, HIGH);
   motorShouldDisable = false;
-  Serial.println("[Motor DISABLED - Anti-overheating]");
 }
 
 void scheduleMotorDisable() {
   motorDisableTime = millis() + MOTOR_HOLD_TIME;
   motorShouldDisable = true;
-  Serial.print("[Motor will disable in ");
-  Serial.print(MOTOR_HOLD_TIME);
-  Serial.println(" ms]");
+}
+
+// ============================================================================
+// HOMING STATE MACHINE (FIXED: Non-blocking)
+// ============================================================================
+
+void startFindHome() {
+  Serial.println("Starting home search...");
+  enableMotor();
+  stepper.setSpeed(-HOMING_SPEED);  // FIXED: Use HOMING_SPEED instead of MAX_SPEED
+  homingState = HOMING_MOVING;
+  homingStartTime = millis();
+}
+
+void updateHomingState() {
+  if (homingState == HOMING_MOVING) {
+    stepper.runSpeed();
+    
+    // Check switch
+    if (digitalRead(HOME_SWITCH_PIN) == LOW) {
+      stepper.stop();
+      stepper.setCurrentPosition(0);
+      currentPosition = 0;
+      preferences.putLong("currPos", currentPosition);
+      Serial.println("Home switch detected!");
+      Serial.println("Home found and set to position 0");
+      homingState = HOMING_DONE;
+      scheduleMotorDisable();
+      updateMenuDisplay();
+    }
+    
+    // Timeout protection (60 seconds)
+    if (millis() - homingStartTime > 60000) {
+      stepper.stop();
+      Serial.println("ERROR: Homing timeout");
+      homingState = HOMING_IDLE;
+      scheduleMotorDisable();
+      updateMenuDisplay();
+    }
+  }
+  
+  // Reset state if homing completed or timeout
+  if (homingState == HOMING_DONE) {
+    homingState = HOMING_IDLE;
+  }
 }
 
 // ============================================================================
@@ -350,7 +418,7 @@ void processCommand(String command) {
     Serial.println(currentPosition);
   } 
   else if (command == "FIND_HOME") {
-    findHome();
+    startFindHome();  // FIXED: Non-blocking start
   } 
   else if (command.startsWith("TEST ")) {
     long steps = command.substring(5).toInt();
@@ -375,21 +443,37 @@ void processCommand(String command) {
     unsigned long value = command.substring(14).toInt();
     setMotorHoldTime(value);
   }
+  else if (command.startsWith("SET_SPEED ")) {
+    float value = command.substring(10).toFloat();
+    setHomingSpeed(value);
+  }
   else if (command == "GET_INFO") {
-    Serial.println("Motor Configuration:");
+    Serial.println("\nMotor Configuration:");
     Serial.print("  Steps per revolution: ");
     Serial.println(STEPS_PER_REV);
     Serial.print("  Max speed (steps/sec): ");
     Serial.println(MAX_SPEED);
     Serial.print("  Acceleration (steps/sec²): ");
     Serial.println(ACCELERATION);
+    Serial.print("  Homing speed (steps/sec): ");
+    Serial.println(HOMING_SPEED);
     Serial.print("  Motor hold time (ms): ");
     Serial.println(MOTOR_HOLD_TIME);
+    Serial.println();
+  }
+  else if (command == "GET_SWITCH") {
+    int switchState = digitalRead(HOME_SWITCH_PIN);
+    Serial.print("Home limit switch status: ");
+    if (switchState == LOW) {
+      Serial.println("TRIGGERED (active low)");
+    } else {
+      Serial.println("NOT TRIGGERED");
+    }
   }
   else {
     Serial.println("ERROR: Unknown command");
   }
-  updateMenuDisplay();  
+  // FIXED: Removed redundant updateMenuDisplay() call (now only in main loop)
 }
 
 // ============================================================================
@@ -409,9 +493,6 @@ void startMotorMovement(long targetPos) {
   stepper.moveTo(targetPos);
   isMotorMoving = true;
   motorMoveStartTime = millis();
-  
-  Serial.print("Motor moving to position ");
-  Serial.println(targetPos);
 }
 
 void updateMotorMovement() {
@@ -463,7 +544,12 @@ void loadPositionFromSlot(int num) {
     Serial.print(num);
     Serial.print(": ");
     Serial.println(targetPos);
-    startMotorMovement(targetPos);
+    
+    if (currentPosition != targetPos) {
+      startMotorMovement(targetPos);
+    } else {
+      Serial.println("Already at target position");  // FIXED: Feedback when already at position
+    }
   } else {
     Serial.print("ERROR: Invalid slot number (0-4): ");
     Serial.println(num);
@@ -494,42 +580,6 @@ void resetHome() {
   Serial.println("Current position set to 0");
 }
 
-void findHome() {
-  Serial.println("Finding home using limit switch...");
-  
-  if (digitalRead(HOME_SWITCH_PIN) == LOW) {
-    Serial.println("Home switch already triggered");
-    stepper.setCurrentPosition(0);
-    currentPosition = 0;
-    preferences.putLong("currPos", currentPosition);
-    Serial.println("Home position set to 0");
-    return;
-  }
-  
-  enableMotor();
-  stepper.setSpeed(-MAX_SPEED);
-  
-  unsigned long timeout = millis() + 60000;
-  
-  while (digitalRead(HOME_SWITCH_PIN) == HIGH && millis() < timeout) {
-    stepper.runSpeed();
-  }
-  
-  if (millis() >= timeout) {
-    Serial.println("ERROR: Home switch detection timeout");
-  } else {
-    Serial.println("Home switch detected");
-  }
-  
-  stepper.stop();
-  stepper.setCurrentPosition(0);
-  currentPosition = 0;
-  preferences.putLong("currPos", currentPosition);
-  
-  Serial.println("Home found and set to position 0");
-  scheduleMotorDisable();
-}
-
 long getCurrentPosition() {
   return currentPosition;
 }
@@ -550,26 +600,28 @@ void setStepsPerRev(int value) {
 }
 
 void setMaxSpeed(float value) {
-  if (value > 0) {
+  if (value > 0 && value <= MAX_SPEED_LIMIT) {  // FIXED: Added upper bound
     MAX_SPEED = value;
     preferences.putFloat("maxSpeed", MAX_SPEED);
     stepper.setMaxSpeed(MAX_SPEED);
     Serial.print("Maximum speed set to: ");
     Serial.println(MAX_SPEED);
   } else {
-    Serial.println("ERROR: Invalid value for maximum speed");
+    Serial.print("ERROR: Speed must be 0 < speed <= ");
+    Serial.println(MAX_SPEED_LIMIT);
   }
 }
 
 void setAcceleration(float value) {
-  if (value > 0) {
+  if (value > 0 && value <= MAX_ACCEL_LIMIT) {  // FIXED: Added upper bound
     ACCELERATION = value;
     preferences.putFloat("acceleration", ACCELERATION);
     stepper.setAcceleration(ACCELERATION);
     Serial.print("Acceleration set to: ");
     Serial.println(ACCELERATION);
   } else {
-    Serial.println("ERROR: Invalid value for acceleration");
+    Serial.print("ERROR: Acceleration must be 0 < accel <= ");
+    Serial.println(MAX_ACCEL_LIMIT);
   }
 }
 
@@ -585,6 +637,19 @@ void setMotorHoldTime(unsigned long value) {
   }
 }
 
+void setHomingSpeed(float value) {
+  if (value > 0 && value <= MAX_SPEED_LIMIT) {  // FIXED: Added bounds checking
+    HOMING_SPEED = value;
+    preferences.putFloat("homingSpeed", HOMING_SPEED);
+    stepper.setSpeed(HOMING_SPEED);
+    Serial.print("Homing speed set to: ");
+    Serial.println(HOMING_SPEED);
+  } else {
+    Serial.print("ERROR: Homing speed must be 0 < speed <= ");
+    Serial.println(MAX_SPEED_LIMIT);
+  }
+}
+
 // ============================================================================
 // TEST FUNCTIONS
 // ============================================================================
@@ -597,7 +662,7 @@ void startTestAccel(long steps) {
     Serial.print("Starting test with ");
     Serial.print(testSteps);
     Serial.println(" steps");
-    Serial.println("WARNING: Motor will stay enabled during test");
+    Serial.println("Test pattern: Forward -> Home -> repeat");
   } else {
     Serial.println("ERROR: Invalid number of steps for test");
   }
@@ -614,11 +679,18 @@ void stopTestAccel() {
 
 void runTestAccel() {
   if (!isMotorMoving) {
-    int targetPosition = testDirection ? testSteps : -testSteps;
+    long targetPosition;
+    
+    if (testDirection) {
+      targetPosition = testSteps;
+      Serial.println("Test: Moving forward");
+    } else {
+      targetPosition = 0;  // FIXED: Return to home between cycles
+      Serial.println("Test: Returning to home");
+    }
+    
     startMotorMovement(targetPosition);
     testDirection = !testDirection;
-    Serial.print("Test cycle: Moving ");
-    Serial.println(testDirection ? "backward" : "forward");
   }
 }
 
@@ -776,10 +848,10 @@ void handleMenu() {
           break;
           
         case 5:
-          if (menuIndex == 3) {
+          if (menuIndex == 3) {  // HOME - special case
             home();
             updateMenuDisplay();
-          } else if (menuIndex == 4) {
+          } else if (menuIndex == 4) {  // RESET_HOME
             inSubMenu = true;
             subMenuType = CONFIRM_RESET_HOME;
             updateMenuDisplay();
@@ -802,7 +874,7 @@ void handleMenu() {
             break;
             
           case 2:
-            inputValue = (inputValue + 20 > MAX_JOG_STEPS) ? MAX_JOG_STEPS : inputValue + 20;
+            inputValue = min(inputValue + 20, (long)MAX_JOG_STEPS);  // FIXED: Use min()
             updateMenuDisplay();
             break;
             
@@ -893,7 +965,22 @@ void handleMenu() {
 
 void enterSubMenu() {
   inSubMenu = true;
-  subMenuType = (SubMenu)(menuIndex + 1);
+  
+  // FIXED: Use safe mapping instead of direct enum cast
+  SubMenu menuMap[] = {
+    GOTO_SAVED,
+    SPEED,
+    ACCEL,
+    HOME_SELECT,
+    RESET_HOME,
+    SAVE_POS,
+    GOTO,
+    JOG
+  };
+  
+  if (menuIndex < menuSize) {
+    subMenuType = menuMap[menuIndex];
+  }
   
   if (subMenuType == SPEED) {
     inputValue = (long)MAX_SPEED;
