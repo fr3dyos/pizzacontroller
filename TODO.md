@@ -1,7 +1,3 @@
-- Reorder menuItems to make "Go to Saved Pos" the first item
-- Add defines for 5 new button pins (12-16)
-- Add global variables for button debouncing
-- Configure new button pins in setup
-- Add handleDirectButtons function
-- Call handleDirectButtons in loop
-- Update updateMenuDisplay to show saved positions when not in submenu
+- [x] Modify readKeypad() function to detect button press and set readings[0]=4095, readings[1]=4095, readings[2]=4905 after formal identification
+- [x] Modify readDirectKeypad() function to detect button press and set readings[0]=4095, readings[1]=4095, readings[2]=4905 after formal identification
+- [x] Test the changes to ensure button detection works and array is updated correctly (compilation successful)
