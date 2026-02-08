@@ -59,21 +59,21 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 // KEYPAD CALIBRATION CONSTANTS
 // ============================================================================
 // Main keypad thresholds (adjust based on your hardware)
-const int KEYPAD_THRESHOLD_4 = 100;
+const int KEYPAD_THRESHOLD_1 = 220;
 const int KEYPAD_THRESHOLD_2 = 800;
-const int KEYPAD_THRESHOLD_3 = 1500;
-const int KEYPAD_THRESHOLD_1 = 2100;
-const int KEYPAD_THRESHOLD_5 = 3200;
+const int KEYPAD_THRESHOLD_3 = 1400;
+const int KEYPAD_THRESHOLD_4 = 2300;
+const int KEYPAD_THRESHOLD_5 = 3600;
 
 // Direct keypad thresholds
-const int DIRECT_KEYPAD_THRESHOLD_1 = 220;
-const int DIRECT_KEYPAD_THRESHOLD_2 = 800;
-const int DIRECT_KEYPAD_THRESHOLD_3 = 1400;
-const int DIRECT_KEYPAD_THRESHOLD_4 = 2300;
+const int DIRECT_KEYPAD_THRESHOLD_1 = 320;
+const int DIRECT_KEYPAD_THRESHOLD_2 = 1000;
+const int DIRECT_KEYPAD_THRESHOLD_3 = 1800;
+const int DIRECT_KEYPAD_THRESHOLD_4 = 2800;
 const int DIRECT_KEYPAD_THRESHOLD_5 = 3600;
 
 // Home switch threshold (hall sensor)
-const int HOME_SWITCH_THRESHOLD = 500;
+const int HOME_SWITCH_THRESHOLD = 1500;
 
 
 // ============================================================================
@@ -426,7 +426,6 @@ void startFindHome() {
   Serial.println(HOME_DIRECTION);
   
   enableMotor();
-  homingSwitchTriggered = false;
   stepper->setSpeedInHz((uint32_t)HOMING_SPEED);
   stepper->setAcceleration((uint32_t)ACCELERATION);
   stepper->move(HOME_DIRECTION * MAX_POSITION);  // Configurable direction
@@ -857,8 +856,9 @@ int readKeypad() {
   static int readingsK[3] = {0, 0, 0};
   static int index = 0;
 
-  int currentReading = analogRead(KEYPAD_PIN);
-  readingsK[index] = currentReading;
+  int currentReadingK = analogRead(KEYPAD_PIN);
+  //Serial.println(currentReadingK);
+  readingsK[index] = currentReadingK;
   index = (index + 1) % 3;
 
   int sum = readingsK[0] + readingsK[1] + readingsK[2];
@@ -890,6 +890,7 @@ int readDirectKeypad() {
   static int index = 0;
 
   int currentReading = analogRead(DIRECT_KEYPAD_PIN);
+  Serial.println(currentReading);
   readingsD[index] = currentReading;
   index = (index + 1) % 3;
 
@@ -921,8 +922,9 @@ int readHomeSwitch() {
   static int readingsH[3] = {0, 0, 0};
   static int index = 0;
 
-  int currentReading = analogRead(HOME_SWITCH_PIN);
-  readingsH[index] = currentReading;
+  int currentReadingH = analogRead(HOME_SWITCH_PIN);
+  //Serial.println(currentReadingH);
+  readingsH[index] = currentReadingH;
   index = (index + 1) % 3;
 
   int sum = readingsH[0] + readingsH[1] + readingsH[2];
