@@ -14,5 +14,5 @@
 **Steps:**
 - [x] 1. Backup current README.md (README.md.backup)
 - [x] 2. Edit README.md with merged content (from README.md.new)
-- [ ] 3. Commit and push to main
+- [x] 3. Commit and push to main
 

@@ -1,16 +1,16 @@
-# PizzaController - ESP32 NEMA23 Stepper Motor Controller with FastAccelStepper
+# PizzaController - NEMA23 Stepper Motor Controller with ESP32 and FastAccelStepper
 
-This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32-Wroom microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for high-performance, non-blocking motor control with smooth acceleration/deceleration and is configured for 1/256 microstepping to achieve precise positioning control. It includes an LCD menu system for easy operation, 5-button keypads for navigation and direct positions, home sensor, and has been optimized for low latency and better performance.
+This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32-Wroom microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for smooth acceleration/deceleration and is configured for 1/8 microstepping to achieve both precise positioning and high speed control. It includes an LCD menu system for easy operation and has been optimized for better code maintenance.
 
 ## Hardware Requirements
 
 - ESP32-Wroom Development Board
-- NEMA23 Stepper Motor (4.01A)
+- NEMA23 Stepper Motor
 - DM556 Stepper Driver
-- Power Supply 24Vdc - 5A
-- 5-Button Keypad (navigation)
-- 16x2 LCD Display (I2C)
-- A3144 Hall Effect Home Sensor
+- 24Vdc - 5A Power Supply
+- 5-Button Keypad
+- 16x2 LCD Display
+- A3144 Hall Effect Home Sensor, powered with 3.3V
 - Custom direct position buttons
 
 ## Wiring Connections
@@ -20,45 +20,60 @@ Connect the ESP32 to the DM556 driver as follows:
 - ESP32 GPIO 18 → DM556 STEP
 - ESP32 GPIO 19 → DM556 DIR
 - ESP32 GPIO 21 → DM556 ENABLE (active low)
-- ESP32 GPIO 22 → DM556 MS1
-- ESP32 GPIO 23 → DM556 MS2
-- ESP32 GPIO 25 → DM556 MS3
-- ESP32 GPIO 26 → Home Limit Sensor (active low, one terminal to GPIO 26 and the other to GND)
+- ESP32 GPIO 27 → Home Limit Sensor
 
 ### Direct Position Buttons
 
-- ESP32 GPIO 34 → Direct Position Buttons
+- ESP32 GPIO 34 → 5-position Direct Position Buttons (analog read)
 
 ### Navigation Keypad
 
-- ESP32 GPIO 35 → Navigation Keypad
+- ESP32 GPIO 35 → Navigation Keypad Buttons (analog read)
 
-### LCD 16x2 I2C Display
+### 16x2 LCD Display via I2C
 
 - ESP32 GPIO 25 → SDA (Serial Data)
 - ESP32 GPIO 26 → SCL (Serial Clock)
-**Note:** GPIO 25/26 used for both MS3/home and LCD I2C – verify code configuration.
+
+## ESP32 Pin Map
+
+| GPIO | Function                    |
+|------|-----------------------------|
+| 18   | STEP DM556                  |
+| 19   | DIR DM556                   |
+| 21   | ENABLE DM556 (active low)   |
+| 25   | SDA I2C LCD 16x2            |
+| 26   | SCL I2C LCD 16x2            |
+| 27   | Home Sensor                 |
+| 34   | Direct position button (A)  |
+| 35   | Analog navigation keypad    |
 
 ### DM556 DIP Switch Configuration
 
-#### Current (NEMA23, 4.01A)
+The DM556 driver uses DIP switches to configure microstepping and other settings. For this project (1/8 microstepping), configure as follows:
 
-- **SW1:** OFF
-- **SW2:** ON
-- **SW3:** OFF
-- **SW4:** ON (full current)
+#### Current
 
-#### Steps (1600 pulses/revolution)
+NEMA23 Motor, 4.01A configuration:
 
-- **SW5:** OFF
-- **SW6:** OFF
-- **SW7:** ON
-- **SW8:** ON
+- **SW1 (MS1):** OFF
+- **SW2 (MS2):** ON
+- **SW3 (MS3):** OFF
+- **SW4 (MS4):** ON (full current)
+
+#### Steps
+
+Configuration for pulses per revolution (default 1600 pulses/rev):
+
+- **SW5 (MS5):** OFF
+- **SW6 (MS6):** OFF
+- **SW7 (MS7):** ON
+- **SW8 (MS8):** ON
 
 ### Power Connections
 
-- **DM556 Driver Power:** 24VDC, 5A power supply connected to DM556 power input terminals (+V and GND).
-- **Stepper Motor Phases:** Connected to DM556 outputs via Permak 4-pin connector (binocular), following color code:
+- **DM556 Driver Power:** 24VDC 5A power supply connected to DM556 power input terminals (+V and GND).
+- **Stepper Motor Power:** Motor phases (A+, A-, B+, B-) connected directly to DM556 outputs via Permak 4-pin connector (binocular), following color code:
 
 | Phase | Motor Color | DM556 Color |
 |-------|-------------|-------------|
@@ -67,15 +82,13 @@ Connect the ESP32 to the DM556 driver as follows:
 | B+    | Green       | Blue        |
 | B-    | Yellow      | White       |
 
-- **ESP32 Power:** Powered from same source through LM2596 Step-Down regulator adjusted to 5V on power pin. Ensure new regulator is set to 5V before connecting to ESP32.
-
-**Note:** Adjust GPIO pins in code if wiring differs. Verify power ratings to avoid damage.
+- **ESP32 Power:** ESP32 powered from same source through LM2596 Step-Down regulator adjusted to 5V on power pin. Ensure new regulator is set to 5V before connecting to ESP32.
 
 ## Software Setup
 
 1. Install Arduino IDE
 2. Install ESP32 board support in Arduino IDE
-3. Install libraries: FastAccelStepper, Preferences, Wire, LiquidCrystal_I2C
+3. Install required libraries: FastAccelStepper, Preferences, Wire, LiquidCrystal_I2C
 4. Open `PizzaController_FastStepper/PizzaController_FastStepper.ino` in Arduino IDE
 5. Select correct ESP32 board and port
 6. Upload the sketch
@@ -83,150 +96,89 @@ Connect the ESP32 to the DM556 driver as follows:
 ## Configuration
 
 The program is configured for:
-- **Microstepping:** 1/256 (maximum precision)
-- **Pulses per Revolution:** 1600
+- **Microstepping:** 1/8
+- **Steps per Revolution:** 1600
 - **Speed:** Adjustable via `SPEED_DELAY` constant (currently 500 microseconds between steps)
 
 ## Program Functionality
 
-The program initializes the stepper motor controller and continuously monitors serial commands for motor control. It supports jogging, position management, homing, and testing. Motor controlled remotely via serial or programmatically.
+The program initializes the stepper motor controller and continuously monitors serial commands for motor control. It supports jogging, position management, homing, and testing. The motor can be controlled remotely via serial commands or programmatically using provided functions.
 
-## New Features Added
+### Serial Commands
+The program supports serial commands for remote control. Open Serial Monitor at 115200 baud and send commands (uppercase, ended with enter).
 
-### Jog Function
-- `jog(steps, direction)`: Move specific number of steps in specified direction
-- Direction: `true` clockwise, `false` counterclockwise
-
-### Position Saving
-- `savePosition()`: Save current position to non-volatile memory (persists across power cycles)
-- Positions loaded automatically on startup
-
-### Homing Function
-- `home()`: Move to home position (0)
-- Calculates movement based on current position
-
-### Reset Home Function
-- `resetHome()`: Set current position as new home (0)
-- Useful for recalibrating reference
-
-### Position Tracking
-- Real-time position relative to home
-- Persistent storage via ESP32 Preferences library
-
-## Usage Examples
-
-### Basic Jogging
-```cpp
-// Jog 1000 steps clockwise
-jog(1000, true);
-
-// Jog 500 steps counterclockwise
-jog(500, false);
-```
-
-### Position Management
-```cpp
-// Move to specific position
-moveSteps(2500, true);
-
-// Save current position
-savePosition();
-
-// Return to home
-home();
-
-// Set current as new home
-resetHome();
-```
-
-### Serial Command Examples
-Open Serial Monitor at 115200 baud, send commands (case-sensitive + newline):
-
-- `JOG F <steps>`: Jog forward (e.g., `JOG F 1000`)
-- `JOG B <steps>`: Jog backward (e.g., `JOG B 500`)
-- `MOVE_TO <position>`: Move absolute (e.g., `MOVE_TO 2500`)
-- `HOME`: To home (0)
-- `FIND_HOME`: Find home via GPIO 26 switch
-- `RESET_HOME`: Current as new home
-- `SAVE_POS <num>`: Save to slot 0-4 (e.g., `SAVE_POS 1`)
-- `LOAD_POS <num>`: Load from slot 0-4
+- `JOG F <steps>`: Jog forward (clockwise) (1-50000)
+- `JOG B <steps>`: Jog backward (counterclockwise) (1-50000)
+- `MOVE_TO <position>`: To absolute position (±1M max)
+- `HOME`: To position 0
+- `RESET_HOME`: Current position as home (0)
+- `SAVE_POS <0-4>`: Save to slot 0-4
+- `LOAD_POS <0-4>`: Go to slot 0-4
 - `GET_POS`: Current position
-- `TEST <steps>` / `RUN_TEST <steps>`: Test mode
-- `STOP`: Stop test
+- `FIND_HOME`: Non-blocking home search with limit sensor
+- `TEST <steps>`: Continuous test (forward/home repeat)
+- `STOP`: Stop test/movement
+- `SET_STEPS <value>`: Steps/rev (saves NVM)
+- `SET_MAX_SPEED <0-50000>`: Max speed steps/sec (saves)
+- `SET_ACCELERATION <0-50000>`: Acceleration steps/sec² (saves)
+- `SET_HOLD_TIME <0-10000>`: Hold time ms after move (saves)
+- `SET_SPEED <0-50000>`: Home speed (saves)
+- `SET_HOME_DIR <-1/+1>`: Home direction (saves)
+- `GET_INFO`: Show config (steps, speed, accel, hold, positions)
+- `GET_SWITCH`: Home sensor status
+- `HELP`: Show command list
 
-Other input: "Unknown command".
-
-### Demo Functions
-```cpp
-demoJog();              // Jog back and forth
-delay(2000);
-demoSaveAndHome();      // Save, home, reset demo
-```
+Others: "Unknown command".
+Examples: `JOG F 1000`, `SET_MAX_SPEED 10000`, `GET_INFO`.
 
 ## Customization
 
-- Change `SPEED_DELAY` (lower = faster)
-- Adjust loop steps for rotation angles
-- `moveSteps()` for custom moves
+- Modify `SPEED_DELAY` to change motor speed (lower values = faster)
+- Adjust step counts in loops for different rotation angles
+- Use `moveSteps()` function for custom movements
 
 ## Serial Debugging
 
-Status messages at 115200 baud in Serial Monitor.
+The program generates status messages in Serial Monitor at 115200 baud. Open Serial Monitor in Arduino IDE to view debug information.
 
 ## Safety Notes
 
-- Proper PSU ratings for motor/driver
-- Verify wiring before power-on
-- Start low speeds, increase gradually
-- Monitor motor temperature
-
-## Troubleshooting
-
-- Motor not moving: Check ENABLE LOW
-- Microstepping pins for 1/256
-- Adequate PSU voltage/current
-- Serial Monitor init messages
-
-## Code Optimizations
-
-- **Enums:** Descriptive states replace magic numbers
-- **FastAccelStepper:** Non-blocking high-perf control
-- **Analog Keypads:** Better integration
-- **Interrupt Homing:** Efficient limit detection
-- **Serial Buffering:** No motor blocking
-- **Persistent Params:** Steps/speed/accel saved NVM
-- **Modular Code:** Logical functions
+- Ensure adequate power supply ratings for motor and driver
+- Verify wiring connections before powering on
+- Start with low speeds and increase gradually as needed
+- Monitor motor temperature during operation
 
 ## LCD Menu System
 
-16x2 I2C LCD with 5-button keypad for standalone operation.
+The controller includes a user-friendly LCD menu system for standalone operation without a computer. The 16x2 I2C LCD displays menu options, and a 5-button analog keypad allows navigation and input.
 
 ### Menu Options
-1. Jog (manual steps)
-2. Change Speed
-3. Change Acceleration
-4. Home
-5. Reset Home (confirm)
-6. Save Position (slot, confirm)
-7. Go to Position (absolute)
-8. Go to Saved Position
+
+1. **Jog**: Manually move motor by entering number of steps
+2. **Change Speed**: Adjust maximum speed setting
+3. **Change Acceleration**: Adjust acceleration setting
+4. **Home**: Move motor to initial position (0)
+5. **Reset Home**: Set current position as new home (requires confirmation)
+6. **Save Position**: Save current position to one of 5 slots (requires confirmation)
+7. **Go to Position**: Move to absolute position (can be negative)
+8. **Go to Saved Position**: Load saved position from one of 5 slots
 
 ### Keypad Controls
-- Up/Down: Navigate
-- Left/Right: ±10
-- Up/Down sub: ±100
-- Select: Enter/execute
 
-### Note
-LCD menu not implemented in current `PizzaController_FastStepper.ino` – may be in development.
+- **Up/Down**: Navigate menu items
+- **Left/Right**: Adjust values in sub-menus (increment/decrement by 10)
+- **Up/Down in sub-menu**: Adjust values by 100
+- **Select (Red)**: Enter sub-menu or execute action
 
-## Advanced Features
+### Menu Navigation
 
-- Encoder position feedback
-- Accel/decel profiles
-- Limit switches
-- Serial integration
+1. Use Up/Down buttons to select menu item
+2. Press Select to enter that item's sub-menu
+3. Use Left/Right/Up/Down to adjust value
+4. Press Select again to execute action and return to main menu
 
 ## Author
 
-Eng. Fredy Osorio <ing.fredyosorio@gmail.com>
+Eng. Fredy Osorio
+
+Rio de Janeiro - Brazil, April 2026.
