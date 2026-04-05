@@ -201,6 +201,8 @@ The controller includes a user-friendly LCD menu system for standalone operation
 
 ## Author
 
-Eng. Fredy Osorio
-ing.fredyosorio@gmai.com
+**Developed for LOEM Laboratory, Physics Department, PUC-Rio.**
+
+Eng. Fredy Osorio  
+ing.fredyosorio@gmail.com  
 Rio de Janeiro - Brazil, April 2026.

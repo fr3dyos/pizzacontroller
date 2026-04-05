@@ -1,123 +1,216 @@
 # PizzaController Troubleshooting Guide
 
-This guide helps you diagnose and resolve common issues with the PizzaController ESP32 stepper motor controller. Follow the steps below for each problem area.
+This guide helps diagnose and resolve common issues with PizzaController (ESP32, DM556 driver, NEMA23 stepper). Follow steps by problem category, from simplest to most likely.
+
+---
 
 ## Motor Not Moving
 
-1. **Check Power Supply:**
-   - Ensure the DM556 driver receives 24-48V DC with sufficient current for your motor.
-   - Verify polarity is correct (+V and GND).
+1. **Power and Ground**
+   - Verify 24VDC between DM556 +V/GND (within driver range).
+   - Check LM2596 adjusted to stable 5V for ESP32/LCD (test multimeter under load).
+   - All GNDs common (supply, DM556, ESP32, LM2596).
 
-2. **Verify Wiring:**
-   - Check all connections between ESP32, DM556 driver, and motor.
-   - Ensure stepper motor phases (A+, A-, B+, B-) are correctly connected to DM556 outputs.
+2. **Motor Wiring**
+   ```
+   | Phase | Motor | DM556 |
+   |-------|-------|-------|
+   | A+    | Red   | Red   |
+   | A-    | Black | Black |
+   | B+    | Green | Blue  |
+   | B-    | Yel   | White |
+   ```
+   - If motor vibrates but doesn't rotate, coils likely swapped. Check continuity or motor docs.
 
-3. **Check ENABLE Pin:**
-   - GPIO 21 should be LOW to enable the DM556 driver.
-   - Verify this in the code and wiring.
+3. **Command Signals (STEP/DIR/ENABLE)**
+   - GPIO 21 (ENABLE) must be LOW to enable DM556 (active low).
+   - Confirm firmware uses correct pins (18=STEP, 19=DIR) and FastAccelStepper initialized.
+   - Quick test: LED + resistor STEP to GND to see pulses on `JOG F 100`.
 
-4. **Microstepping Configuration:**
-   - Confirm DM556 DIP switches: SW1 (MS1)=ON, SW2 (MS2)=ON, SW3 (MS3)=ON for 1/256 microstepping.
-   - Ensure ESP32 pins GPIO 22, 23, 25 are HIGH for MS1, MS2, MS3.
+4. **DM556 DIP Switches (1/8 microstep, 4.01A, 1600ppr)**
+   ```
+   Current: SW1 OFF, SW2 ON, SW3 OFF, SW4 ON
+   Steps:   SW5 OFF, SW6 OFF, SW7 ON, SW8 ON
+   ```
+   - Current too low → low torque, motor "sings" without rotating.
+   - Current too high → excessive heat (see Overheating).
 
-5. **Serial Monitor:**
-   - Open Serial Monitor at 115200 baud.
-   - Check for initialization messages like "Stepper initialized" or "AccelStepper initialized".
+5. **Firmware Running**
+   - Serial Monitor (115200): After reset, expect:
+     - `Pizza Controller - FIXED VERSION`
+     - `System ready!`
+   - No messages → check USB data cable, COM port, board selection.
 
-## Direct Position Buttons Not Working
+6. **Brown-out/Reset During Movement**
+   - ESP32 reboots on start → voltage drop (undersized PSU) or poor GND.
+   - Test `SET_MAX_SPEED`/`SET_ACCELERATION` lower, verify 24V/5A supply.
 
-1. **Check Wiring:**
-   - Buttons should be connected to GPIO 12-16 and GND.
-   - Ensure active low configuration (button pressed = LOW).
+---
 
-2. **Code Configuration:**
-   - Verify internal pull-ups are enabled for GPIO 12-16.
-   - Check if debouncing is implemented in the handleDirectButtons() function.
+## Buttons/Keypad Not Responding
 
-3. **Serial Output:**
-   - Press buttons and look for "Direct button X pressed" messages in Serial Monitor.
-   - If no messages appear, check wiring and code.
+1. **Pins and Power**
+   - GPIO 34: Direct 5-pos buttons (analog, 3.3V VCC, common GND).
+   - GPIO 35: Navigation keypad (analog, 3.3V).
+   - Measure voltage GPIO 34/35 to GND per button; levels must differ (resistor ladder).
 
-4. **Button Functionality:**
-   - Ensure saved positions exist (use SAVE_POS command).
-   - Test LOAD_POS command to verify position loading works.
+2. **Code Analog Thresholds**
+   ```
+   KEYPAD: 220/800/1400/2300/3600
+   DIRECT: 320/1000/1800/2800/3600
+   HOME:   <1500
+   ```
+   - If ADC readings (Serial) don't match intervals, adjust code thresholds.
 
-## Serial Communication Issues
+3. **Serial Test**
+   - Press buttons → Serial: `Direct keypad button X pressed`.
+   - Confirm slots 0-4 load saved positions on press.
 
-1. **Baud Rate:**
-   - Set Serial Monitor to 115200 baud.
+---
 
-2. **COM Port:**
-   - Select the correct COM port for your ESP32 in Arduino IDE.
+## LCD Not Displaying
 
-3. **USB Connection:**
-   - Verify USB cable and drivers are working.
-   - Try a different USB port or cable.
+1. **I2C Wiring**
+   - SDA → GPIO 25, SCL → GPIO 26.
+   - I2C VCC → 5V (LM2596), GND common.
+   - Check SDA/SCL not swapped, ESP32/LCD/source GND common.
 
-4. **Code Upload:**
-   - Ensure code uploads successfully before testing serial commands.
-   - Check for compilation errors.
+2. **I2C Address**
+   - Code default: `0x27`.
+   - Some modules use `0x3F`; run ESP32 I2C scanner to find actual address.
 
-## LCD Display Not Working
+3. **Initialization**
+   - Serial shows "Pizza Ctrl FIXED" but LCD blank → hardware (power/I2C) or wrong address.
+   - Adjust `LiquidCrystal_I2C` address/init per module.
 
-1. **I2C Connections:**
-   - SDA: GPIO 25
-   - SCL: GPIO 26
+---
 
-2. **LCD Address:**
-   - Verify LCD I2C address is 0x27 or 0x3F (common addresses).
+## Home Sensor Not Working
 
-3. **Power Supply:**
-   - Ensure LCD receives 5V power.
-   - Check VCC and GND connections.
+1. **A3144 Hall Connections**
+   - Signal → GPIO 27.
+   - VCC → 3.3V, GND common.
+   - Check polarity (some modules have hard-to-read silkscreen).
 
-4. **Library:**
-   - Confirm LiquidCrystal_I2C library is installed.
+2. **Reading and Threshold**
+   - HOME threshold: ADC `<1500` = triggered (per code).
+   - Test `GET_SWITCH` Serial: Observe value/state with/without magnet near sensor.
 
-5. **Serial Output:**
-   - Check for LCD-related error messages in Serial Monitor.
+3. **FIND_HOME Routine**
+   - `FIND_HOME` moves until triggered, 50ms debounce.
+   - Motor passes sensor:
+     - Check homing direction (`SET_HOME_DIR`).
+     - Check magnet polarity.
+     - Lower homing speed (`SET_SPEED`) for precision.
 
-## Power Supply Problems
+---
 
-1. **Voltage Levels:**
-   - ESP32: 5V/3.3V
-   - DM556 Driver: 24-48V DC
-   - LCD: 5V
+## Serial Commands Not Working
 
-2. **Polarity:**
-   - Double-check all power connections for correct polarity.
+1. **Serial Monitor Setup**
+   - 115200 baud, 8N1, no flow control.
+   - Commands **UPPERCASE**, ended with Enter (CR/LF per settings).
 
-3. **Current Capacity:**
-   - Ensure power supplies can handle the required current for all components.
+2. **Basic Test Commands**
+   - `HELP` → full command list.
+   - `JOG F 1000`, `JOG B 1000` → quick movement test.
+   - `SET_MAX_SPEED 10000`, `SET_ACCELERATION 5000` → adjust dynamics.
+   - `GET_INFO` → shows steps, speed, accel, hold, saved positions.
 
-4. **Common Ground:**
-   - Verify all components share a common ground connection.
+3. **No Terminal Echo**
+   - Nothing on typing:
+     - Verify correct COM port.
+     - Use USB data cable (not charge-only).
+     - Close other apps using port.
 
-## Code Compilation Errors
+---
 
-1. **Required Libraries:**
-   - Install: AccelStepper, Preferences, Wire, LiquidCrystal_I2C
+## Upload/Compilation Failure
 
-2. **Board Selection:**
-   - Select "ESP32 Dev Module" in Arduino IDE Tools > Board.
+1. **Required Libraries**
+   - Installed: `FastAccelStepper`, `Preferences`, `Wire`, `LiquidCrystal_I2C`.
+   - Avoid multiple versions in Arduino folders.
 
-3. **Syntax Errors:**
-   - Check for missing semicolons, brackets, or typos.
-   - Ensure all variables are declared.
+2. **Board/Port Selection**
+   - Board: "ESP32 Dev Module" (or compatible).
+   - Port: **Tools > Port**.
 
-4. **Include Statements:**
-   - Verify all necessary headers are included at the top of the sketch.
+3. **Common Upload Issues**
+   - Port missing: USB driver or charge-only cable.
+   - Connection errors:
+     - Try different USB cable/port/PC hub.
+     - Hold BOOT/EN during upload start.
 
-## Additional Help
+---
 
-If these steps don't resolve your issue:
-- Review the README.md for detailed setup instructions.
-- Check the serial output for specific error messages.
-- Verify all hardware connections match the wiring diagrams.
-- Test with a simple example sketch to isolate the problem.
+## Overheating
 
-For community support, please provide:
-- Your hardware setup details
-- Code version and modifications
-- Serial output messages
-- Specific symptoms of the problem
+1. **Motor/Driver**
+   - DM556 4.01A may be high for some NEMA23; check motor rated current.
+   - Lower DIP current if too hot to touch (shouldn't burn hand seconds).
+
+2. **Operating Conditions**
+   - Holding position generates heat.
+   - `SET_HOLD_TIME` reduces energized time post-move.
+   - Ensure DM556/motor ventilation (heatsinks/fan if needed).
+
+3. **Power Supply**
+   - Undersized PSU overheats, causes voltage sag.
+   - Use quality 24V ≥5A supply.
+
+---
+
+## Position Not Persisting
+
+1. **NVM Storage (Preferences)**
+   - After `SAVE_POS <slot>`, reboot ESP32, `GET_INFO` to verify reload.
+   - Check `Preferences` namespace unchanged (resets old data).
+
+2. **Recommended Procedure**
+   - Always home (`HOME`/`FIND_HOME`) after power-on before trusting saved positions.
+   - Home first, move to desired, then `SAVE_POS`.
+
+---
+
+## LCD Menu Freezing
+
+1. **Debounce and ADC Noise**
+   - Menu 300ms debounce (`lastKeyTime`) prevents double-clicks.
+   - Noisy ADC causes false clicks or stuck states.
+
+---
+
+## Recommended Quick Tests
+
+```
+Serial:
+GET_POS
+GET_INFO
+GET_SWITCH
+JOG F 50        (small movement test)
+FIND_HOME       (verify home sensor)
+TEST 100        (forward/home loop stress-test)
+
+Menu:
+Navigate Up/Down → Red Select to execute
+```
+
+---
+
+## General Checks
+
+- All GNDs common (supply, DM556, ESP32, LM2596).
+- LM2596 regulated/stable 5V under load.
+- 24V supply ≥5A current.
+- Connectors/screws tight, no loose/mis-crimped wires.
+- ESP32 reset after wiring/params changes.
+
+If persists, capture:
+- Sharp wiring photos (supply, DM556, ESP32, motor, LCD, sensors).
+- Full Serial log (boot + test commands).
+
+Open GitHub repo issue for detailed analysis.
+
+**Eng. Fredy Osorio**  
+ing.fredyosorio@gmail.com  
+Rio de Janeiro, 2026

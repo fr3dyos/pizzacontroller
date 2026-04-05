@@ -1,54 +1,79 @@
-# ESP32 Pinout for PizzaController
+# ESP32 Pinout Reference - PizzaController
 
-This document lists the GPIO pins used by the PizzaController project on the ESP32 microcontroller.
+Pin assignments for PizzaController based on current hardware configuration.
 
-## Pin Assignments
+## Active Pins Used
 
-| GPIO Pin | Function | Connected To | Notes |
-|----------|----------|--------------|-------|
-| GPIO 12 | BUTTON1_PIN | Direct Position Button 1 | Active low input, loads position 0 |
-| GPIO 13 | BUTTON2_PIN | Direct Position Button 2 | Active low input, loads position 1 |
-| GPIO 14 | BUTTON3_PIN | Direct Position Button 3 | Active low input, loads position 2 |
-| GPIO 15 | BUTTON4_PIN | Direct Position Button 4 | Active low input, loads position 3 |
-| GPIO 16 | BUTTON5_PIN | Direct Position Button 5 | Active low input, loads position 4 |
-| GPIO 18 | STEP | DM556 Driver STEP input | Pulse signal for stepper motor steps |
-| GPIO 19 | DIR | DM556 Driver DIR input | Direction control (HIGH = clockwise, LOW = counterclockwise) |
-| GPIO 21 | ENABLE | DM556 Driver ENABLE input | Active low enable signal |
-| GPIO 22 | MS1 | DM556 Driver MS1 input | Microstepping control |
-| GPIO 23 | MS2 | DM556 Driver MS2 input | Microstepping control |
-| GPIO 25 | LCD_SDA | LCD I2C SDA | I2C data line for LCD display |
-| GPIO 26 | LCD_SCL | LCD I2C SCL | I2C clock line for LCD display |
-| GPIO 27 | HOME_SWITCH | Home Limit Switch | Active low input with internal pull-up |
-| GPIO 34 | KEYPAD_PIN | 5-button Analog Keypad | ADC input for keypad button detection |
+| GPIO | Function | Connected To | Type | Notes |
+|------|----------|--------------|------|-------|
+| 18 | STEP | DM556 STEP | Digital Out | Stepper pulses |
+| 19 | DIR | DM556 DIR | Digital Out | Direction control |
+| 21 | ENABLE | DM556 EN | Digital Out | Active LOW enable |
+| 25 | SDA | LCD I2C SDA | I2C | Address 0x27 |
+| 26 | SCL | LCD I2C SCL | I2C | 16x2 display |
+| 27 | HOME | A3144 Hall Sensor | Analog In | Threshold <1500, 3.3V |
+| 34 | DIRECT_BTN | 5-pos Direct Buttons | Analog In (ADC1_CH6) | Thresholds: 320/1000/1800/2800/3600 |
+| 35 | KEYPAD | Navigation Keypad | Analog In (ADC1_CH7) | Thresholds: 220/800/1400/2300/3600 |
 
-## I2C Pins (for LCD)
+## Power Connections
 
-- SDA: GPIO 25
-- SCL: GPIO 26
+| Rail | Source | Used By |
+|------|--------|---------|
+| 24VDC 5A | Power Supply | DM556 +V |
+| 5V | LM2596 (from 24V) | ESP32 VIN, LCD VCC |
+| 3.3V | ESP32 | Hall VCC, Buttons VCC |
+| GND | Common | All components |
 
-## Notes
+## DM556 DIP Configuration (1/8 microstep, 1600ppr, 4.01A)
 
-- GPIO 16 and GPIO 17 are dedicated to LCD I2C communication
-- GPIO 34 is an ADC-capable pin used for analog keypad input
-- GPIO 26 has internal pull-up resistor enabled for the limit switch
-- All pins are configured as digital I/O except GPIO 34 which is analog input
+| SW | Setting | Purpose |
+|----|---------|---------|
+| 1  | OFF | Current (MS1) |
+| 2  | ON  | Current (MS2) |
+| 3  | OFF | Current (MS3) |
+| 4  | ON  | Current full |
+| 5  | OFF | Steps |
+| 6  | OFF | Steps |
+| 7  | ON  | Steps |
+| 8  | ON  | Steps |
 
-## ESP32 Pin Capabilities
+## Motor Wiring (Permak 4-pin)
 
-- **GPIO 18, 19, 21-23, 25-27**: Digital I/O, PWM capable
-- **GPIO 34**: ADC1_CH6, input only (no pull-up/down)
+| Phase | Motor Wire | DM556 Terminal |
+|-------|------------|----------------|
+| A+    | Red        | Red            |
+| A-    | Black      | Black          |
+| B+    | Green      | Blue           |
+| B-    | Yellow     | White          |
 
-## Power Pins
+## Capabilities & Restrictions
 
-- 3.3V: Power for ESP32 logic
-- 5V: Power for LCD and keypad (if needed)
-- GND: Common ground
+- **Analog Inputs:** GPIO 34/35/27 only (ADC1)
+- **No MS1/MS2/MS3 control:** DM556 DIP switches only
+- **GPIO 34/35:** Input-only (no pullup/down), perfect for analog buttons
+- **GPIO 27:** Analog for Hall threshold detection (<1500 = triggered)
+- **I2C:** GPIO 25/26 standard
+- **No interrupts:** Hall polling with std dev filter/debounce
 
-## Unused Pins
+## Available for Expansion
 
-The following pins are available for future expansion:
-- GPIO 0, 2, 4, 5, 12-17, 28, 32, 33, 35
-- ADC pins: GPIO 32, 33, 35 (GPIO 34 is used for keypad)
-- DAC pins: GPIO 25, 26 (but GPIO 25 and 26 are used)
-- I2C: GPIO 16 (SDA), GPIO 17 (SCL) - available
-- SPI: GPIO 18, 19, 21, 22, 23 - partially used
+- GPIO 0, 2, 4, 5, 32, 33 (ADC2)
+- UART2: GPIO 16/17
+- SPI: GPIO 23 (if freed)
+
+## Verification Checklist
+
+```
+[X] GPIO 18/19/21 → DM556 STEP/DIR/EN ✓
+[X] GPIO 25/26 → LCD I2C ✓
+[X] GPIO 27 analog Hall 3.3V ✓
+[X] GPIO 34/35 analog buttons 3.3V ✓
+[X] LM2596 5V → ESP32/LCD ✓
+[X] 24V 5A → DM556 ✓
+[X] DIP SW1-8 per table ✓
+[X] Motor colors match ✓
+[X] All GND common ✓
+```
+
+**Eng. Fredy Osorio**  
+*Rio de Janeiro, April 2026*

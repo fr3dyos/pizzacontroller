@@ -205,8 +205,10 @@ O controlador inclui um sistema de menu LCD amigável para operação fácil sem
 
 ## Autor
 
-Eng. Fredy Osorio 
-ing.fredyosorio@gmai.com
+**Desenvolvido para o Laboratório LOEM, Departamento de Física, PUC-Rio.**
+
+Eng. Fredy Osorio  
+ing.fredyosorio@gmail.com  
 Rio de Janeiro - Brasil, abril de 2026.
 
 
