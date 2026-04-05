@@ -1,4 +1,9 @@
 # Arduino IDE / PlatformIO / ESP32
+*.todo
+TODO*
+TODO.md
+TODO-README.md
+PizzaController_AccelStepper
 *.elf
 *.bin
 *.hex
