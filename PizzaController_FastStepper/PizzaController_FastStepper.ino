@@ -3,7 +3,7 @@
 // Features: Non-blocking control, anti-overheating, position saving, LCD menu, optimized for speed
 // Fixes Applied: ISR safety, non-blocking I/O, motor hold logic, array sizing, cached position refresh
 // Original Author: Eng. Fredy Osorio <ing.fredyosorio@gmail.com>
-// Fixed Version: January 31, 2026
+// Fixed Version: February 9, 2026
 // Based on: FastAccelStepper library for high-performance stepper control
 
 
@@ -27,6 +27,7 @@
 // - SET_HOME_DIR <dir>: Set homing direction (-1 or +1) and save to memory
 // - GET_INFO: Display motor configuration (steps, speed, acceleration, hold time)
 // - GET_SWITCH: Read home limit switch status
+// - HELP: Shows all the Serial Commands
 
 
 // ============================================================================
@@ -106,20 +107,20 @@ struct SerialLogBuffer {
   static const int MAX_MESSAGES = 16;
   String messages[MAX_MESSAGES];
   int count = 0;
-  
+
   void add(const String &msg) {
     if (count < MAX_MESSAGES) {
       messages[count++] = msg;
     }
   }
-  
+
   void flush() {
     for (int i = 0; i < count; i++) {
       Serial.println(messages[i]);
     }
     count = 0;
   }
-  
+
   bool isEmpty() {
     return count == 0;
   }
@@ -145,7 +146,7 @@ const float MAX_ACCEL_LIMIT = 50000.0;
 
 unsigned long MOTOR_HOLD_TIME   = 300;
 unsigned long motorDisableTime  = 0;
-bool          motorShouldDisable= false;
+bool          motorShouldDisable = false;
 
 
 // ============================================================================
@@ -242,6 +243,8 @@ int  readKeypad();
 int  readDirectKeypad();
 int  readHomeSwitch();
 void logSmart(const String &msg);
+void motorInfo();
+void help();
 
 
 // ============================================================================
@@ -325,15 +328,9 @@ void setup() {
     }
   }
 
-  Serial.print(F("Home position: ")); Serial.println(homePosition);
-  Serial.print(F("Current position: ")); Serial.println(currentPosition);
-  Serial.print(F("Steps per revolution: ")); Serial.println(STEPS_PER_REV);
-  Serial.print(F("Max speed: ")); Serial.println(MAX_SPEED);
-  Serial.print(F("Acceleration: ")); Serial.println(ACCELERATION);
-  Serial.print(F("Homing speed: ")); Serial.println(HOMING_SPEED);
-  Serial.print(F("Homing direction: ")); Serial.println(HOME_DIRECTION);
-  Serial.print(F("Motor hold time: ")); Serial.print(MOTOR_HOLD_TIME);
-  Serial.println(F(" ms\n"));
+  motorInfo();
+  help();
+
 
   Wire.begin(25, 26);
   lcd.init();
@@ -424,10 +421,10 @@ void startFindHome() {
   Serial.println(F("Starting home search..."));
   Serial.print(F("Moving in direction: "));
   Serial.println(HOME_DIRECTION);
-  
+
   enableMotor();
-  stepper->setSpeedInHz((uint32_t)HOMING_SPEED);
-  stepper->setAcceleration((uint32_t)ACCELERATION);
+  stepper->setSpeedInHz((uint32_t)HOMING_SPEED/2);
+  stepper->setAcceleration((uint32_t)ACCELERATION/2);
   stepper->move(HOME_DIRECTION * MAX_POSITION);  // Configurable direction
   homingState   = HOMING_MOVING;
   homingStartTime = millis();
@@ -446,7 +443,7 @@ void updateHomingState() {
 
       // Home switch detected!
       stepper->forceStop();
-      delay(10);  // Allow motion to settle
+      delay(50);  // Allow motion to settle
 
       // NOTE: setCurrentPosition() only works reliably in standstill.
       // The RMT module may have off-by-X steps in the current command.
@@ -484,10 +481,10 @@ void updateHomingState() {
 // ============================================================================
 void handleSerialInput() {
   static String commandBuffer = "";
-  
+
   while (Serial.available() > 0) {
     char c = Serial.read();
-    
+
     if (c == '\n') {
       commandBuffer.trim();
       if (commandBuffer.length() > 0) {
@@ -498,7 +495,7 @@ void handleSerialInput() {
       commandBuffer = "";
     } else if (c != '\r') {  // Skip carriage returns
       commandBuffer += c;
-      
+
       // Safety: discard if too long
       if (commandBuffer.length() > 100) {
         logSmart("ERROR: Command too long, discarded");
@@ -592,25 +589,67 @@ void processCommand(String command) {
     setHomeDirection(value);
   }
   else if (command == "GET_INFO") {
-    Serial.println(F("\nMotor Configuration:"));
-    Serial.print(F("  Steps per revolution: ")); Serial.println(STEPS_PER_REV);
-    Serial.print(F("  Max speed (steps/sec): ")); Serial.println(MAX_SPEED);
-    Serial.print(F("  Acceleration (steps/sec²): ")); Serial.println(ACCELERATION);
-    Serial.print(F("  Homing speed (steps/sec): ")); Serial.println(HOMING_SPEED);
-    Serial.print(F("  Homing direction: ")); Serial.println(HOME_DIRECTION);
-    Serial.print(F("  Motor hold time (ms): ")); Serial.println(MOTOR_HOLD_TIME);
-    Serial.println();
+    motorInfo();
   }
   else if (command == "GET_SWITCH") {
     int switchState = digitalRead(HOME_SWITCH_PIN);
     Serial.print(F("Home limit switch status: "));
     Serial.println((switchState == LOW) ? F("TRIGGERED") : F("NOT TRIGGERED"));
   }
+  else if (command == "HELP") {
+    help();
+  }
   else {
     logSmart("ERROR: Unknown command: " + command);
   }
 }
 
+void motorInfo() {
+  Serial.println("=========================================================");
+  Serial.println(F("\nMotor Configuration:"));
+  Serial.print(F("- Home position: ")); Serial.println(homePosition);
+  Serial.print(F("- Current position: ")); Serial.println(currentPosition);
+  Serial.print(F("- Steps per revolution: ")); Serial.println(STEPS_PER_REV);
+  Serial.print(F("- Max speed (steps/sec): ")); Serial.println(MAX_SPEED);
+  Serial.print(F("- Acceleration (steps/sec²): ")); Serial.println(ACCELERATION);
+  Serial.print(F("- Homing speed (steps/sec): ")); Serial.println(HOMING_SPEED);
+  Serial.print(F("- Homing direction: ")); Serial.println(HOME_DIRECTION);
+  Serial.print(F("- Motor hold time (ms): ")); Serial.println(MOTOR_HOLD_TIME);
+  Serial.println();
+  Serial.println(F("Saved Positions:"));
+  for (int i = 0; i < 5; i++) {
+    Serial.print(F("- Slot ")); Serial.print(i); Serial.print(F(": ")); Serial.println(savedPositions[i]);
+  }
+  Serial.println();
+  Serial.println("=========================================================");
+
+}
+
+void help() {
+  Serial.println("=========================================================");
+  Serial.println("<<<<<  Serial Commands  >>>>>");
+  Serial.println("- JOG F <steps>: Jog forward (clockwise) by <steps> steps");
+  Serial.println("- JOG B <steps>: Jog backward (counterclockwise) by <steps> steps");
+  Serial.println("- MOVE_TO <position>: Move to absolute position <position>");
+  Serial.println("- HOME: Move to home position (0)");
+  Serial.println("- RESET_HOME: Set current position as new home");
+  Serial.println("- SAVE_POS <num>: Save current position to slot <num> (0-4)");
+  Serial.println("- LOAD_POS <num>: Load position from slot <num>");
+  Serial.println("- GET_POS: Print current position");
+  Serial.println("- FIND_HOME: Find home using limit switch (non-blocking)");
+  Serial.println("- TEST <steps>: Start continuous test with <steps> steps");
+  Serial.println("- STOP: Stop the test");
+  Serial.println("- SET_STEPS <value>: Set steps per revolution and save to memory");
+  Serial.println("- SET_MAX_SPEED <value>: Set maximum speed and save to memory (0 < value <= 50000)");
+  Serial.println("- SET_ACCELERATION <value>: Set acceleration and save to memory (0 < value <= 50000)");
+  Serial.println("- SET_HOLD_TIME <ms>: Set motor hold time after move (0-10000 ms)");
+  Serial.println("- SET_SPEED <value>: Set homing speed and save to memory (0 < value <= 50000)");
+  Serial.println("- SET_HOME_DIR <dir>: Set homing direction (-1 or +1) and save to memory");
+  Serial.println("- GET_INFO: Display motor configuration (steps, speed, acceleration, hold time)");
+  Serial.println("- GET_SWITCH: Read home limit switch status");
+  Serial.println("- HELP: Shows all the Serial Commands");
+  Serial.println("=========================================================");
+}
 
 // ============================================================================
 // NON-BLOCKING MOTOR MOVEMENT
@@ -704,6 +743,8 @@ void resetHome() {
   preferences.putLong("homePos", homePosition);
   preferences.putLong("currPos", currentPosition);
   logSmart("Home reset. New home offset: " + String(homePosition));
+  homePosition    = currentPosition;
+  preferences.putLong("homePos", homePosition);
   logSmart("Current position set to 0");
   updateMenuDisplay();
 }
@@ -838,13 +879,16 @@ void handleDirectButtons() {
     lastDirectKey = key;
     lastDirectKeyTime = currentTime;
 
-    if (key >= 1 && key <= 5) {
+    if (key >= 2 && key <= 5) {
       logSmart("Direct keypad button " + String(key) + " pressed");
       loadPositionFromSlot(key - 1);  // Slots are 0-4 for buttons 1-5
+    } else if (key == 1) {
+      startFindHome();
     }
   } else if (key == 0) {
     lastDirectKey = 0;
   }
+  updateMenuDisplay();
 }
 
 
@@ -890,7 +934,7 @@ int readDirectKeypad() {
   static int index = 0;
 
   int currentReading = analogRead(DIRECT_KEYPAD_PIN);
-  Serial.println(currentReading);
+  //Serial.println(currentReading);
   readingsD[index] = currentReading;
   index = (index + 1) % 3;
 
@@ -955,14 +999,14 @@ void updateMenuDisplay() {
   long pos = getCurrentPosition();  // Always fresh from stepper
   bool positionChanged = (pos != lastDisplayedPosition);
   bool menuStateChanged = (inSubMenu != lastMenuWasSubMenu) || (menuIndex != lastDisplayedIndex);
-  
+
   // Skip refresh if nothing changed (saves I2C bus time)
   if (!positionChanged && !menuStateChanged && !inSubMenu) {
     return;
   }
 
   lcd.clear();
-  
+
   if (!inSubMenu) {
     lcd.setCursor(0, 0);
     lcd.print(F("Pos:"));
@@ -974,13 +1018,13 @@ void updateMenuDisplay() {
     String menuStr = menuItems[menuIndex];
     if (menuStr.length() > 16) menuStr = menuStr.substring(0, 16);
     lcd.print(menuStr);
-    
+
     lastDisplayedPosition = pos;
     lastDisplayedIndex = menuIndex;
     lastMenuWasSubMenu = false;
   } else {
     lastMenuWasSubMenu = true;
-    
+
     switch (subMenuType) {
       case JOG:
         lcd.setCursor(0, 0);
@@ -1005,62 +1049,62 @@ void updateMenuDisplay() {
         break;
 
       case SAVE_POS: {
-        lcd.setCursor(0, 0);
-        lcd.print(F("Slot "));
-        lcd.print(inputValue + 1);
-        lcd.print(F(": "));
-        String savedStr = String(savedPositions[inputValue]);
-        if (savedStr.length() > 5) savedStr = savedStr.substring(0, 5);
-        lcd.print(savedStr);
-        lcd.setCursor(0, 1);
-        lcd.print(F("Select to Save"));
-        break;
-      }
+          lcd.setCursor(0, 0);
+          lcd.print(F("Slot "));
+          lcd.print(inputValue + 1);
+          lcd.print(F(": "));
+          String savedStr = String(savedPositions[inputValue]);
+          if (savedStr.length() > 5) savedStr = savedStr.substring(0, 5);
+          lcd.print(savedStr);
+          lcd.setCursor(0, 1);
+          lcd.print(F("Select to Save"));
+          break;
+        }
 
       case GOTO: {
-        lcd.setCursor(0, 0);
-        lcd.print(F("Go to Pos:"));
-        lcd.setCursor(0, 1);
-        lcd.print(inputValue);
-        break;
-      }
+          lcd.setCursor(0, 0);
+          lcd.print(F("Go to Pos:"));
+          lcd.setCursor(0, 1);
+          lcd.print(inputValue);
+          break;
+        }
 
       case GOTO_SAVED: {
-        lcd.setCursor(0, 0);
-        lcd.print(F("Slot "));
-        lcd.print(inputValue + 1);
-        lcd.print(F(": "));
-        String loadStr = String(savedPositions[inputValue]);
-        if (loadStr.length() > 5) loadStr = loadStr.substring(0, 5);
-        lcd.print(loadStr);
-        lcd.setCursor(0, 1);
-        lcd.print(F("Select to Load"));
-        break;
-      }
+          lcd.setCursor(0, 0);
+          lcd.print(F("Slot "));
+          lcd.print(inputValue + 1);
+          lcd.print(F(": "));
+          String loadStr = String(savedPositions[inputValue]);
+          if (loadStr.length() > 5) loadStr = loadStr.substring(0, 5);
+          lcd.print(loadStr);
+          lcd.setCursor(0, 1);
+          lcd.print(F("Select to Load"));
+          break;
+        }
 
       case CONFIRM_RESET_HOME: {
-        lcd.setCursor(0, 0);
-        lcd.print(F("Reset Home?"));
-        lcd.setCursor(0, 1);
-        lcd.print(F("Sel:Yes  Any:No"));
-        break;
-      }
+          lcd.setCursor(0, 0);
+          lcd.print(F("Reset Home?"));
+          lcd.setCursor(0, 1);
+          lcd.print(F("Sel:Yes  Any:No"));
+          break;
+        }
 
       case CONFIRM_SAVE_POS: {
-        lcd.setCursor(0, 0);
-        lcd.print(F("Save to Slot "));
-        lcd.print(inputValue + 1);
-        lcd.print(F("?"));
-        lcd.setCursor(0, 1);
-        lcd.print(F("Sel:Yes  Any:No"));
-        break;
-      }
+          lcd.setCursor(0, 0);
+          lcd.print(F("Save to Slot "));
+          lcd.print(inputValue + 1);
+          lcd.print(F("?"));
+          lcd.setCursor(0, 1);
+          lcd.print(F("Sel:Yes  Any:No"));
+          break;
+        }
 
       default: {
-        lcd.setCursor(0, 0);
-        lcd.print(F("Menu"));
-        break;
-      }
+          lcd.setCursor(0, 0);
+          lcd.print(F("Menu"));
+          break;
+        }
     }
   }
 }
@@ -1095,7 +1139,7 @@ void handleMenu() {
             updateMenuDisplay();
           } else if (menuIndex == 4) {
             inSubMenu  = true;
-            subMenuType= CONFIRM_RESET_HOME;
+            subMenuType = CONFIRM_RESET_HOME;
             updateMenuDisplay();
           } else {
             enterSubMenu();
