@@ -1,0 +1,84 @@
+# Arduino IDE / PlatformIO / ESP32
+*.elf
+*.bin
+*.hex
+*.ino.*
+*.ino.with_bootloader.bin
+*.o
+*.d
+*.a
+*.su
+*.cpp.o
+*.cpp.d
+*.cpp.e
+*.cpp.p
+*.s.o
+*.s.d
+*.s.su
+*.ino.cpp.o
+*.ino.cpp.d
+*.ino.cpp.e
+*.ino.cpp.p
+*.ino.s.o
+*.ino.s.d
+*.ino.s.su
+*.a.tmp
+.cproj
+.ide/
+platformio.ini
+pioenvs/
+pio-cache/
+.pio
+.pioenvs/
+*.piolog
+*.pioopts
+*.piobuildstate
+*.pioasmbuildstate
+project.json
+.env
+*.build
+build/
+.pio/libdeps/
+lib_deps_*.txt
+libraries/
+examples/
+PrivateLibs/
+extras/
+PrivateLibs/
+tools/
+src/.*.cpp
+src/.*.h
+PrivateLibs/
+.vscode/
+.idea/
+*.bak
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+# Git and OS
+.git/
+.gitignore
+.DS_Store
+Thumbs.db
+# Temp files
+*.tmp
+*.temp
+*.swp
+*~
+# Logs
+*.log
+logs/
+# IDE specific
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+# Compiled binaries
+*.exe
+*.dll
+*.so
+# test files
+PizzaController_Acc*
+

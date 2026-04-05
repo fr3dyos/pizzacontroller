@@ -1,3 +1,11 @@
-- [x] Modify readKeypad() function to detect button press and set readings[0]=4095, readings[1]=4095, readings[2]=4905 after formal identification
-- [x] Modify readDirectKeypad() function to detect button press and set readings[0]=4095, readings[1]=4095, readings[2]=4905 after formal identification
-- [x] Test the changes to ensure button detection works and array is updated correctly (compilation successful)
+# Git Branch Merge Plan to Main
+
+## Steps:
+- [ ] 1. Stage and commit `.gitignore` to `test-parallel-code`
+- [ ] 2. Push `test-parallel-code` to origin
+- [ ] 3. Switch to `main` branch
+- [ ] 4. Pull latest `main` from origin
+- [ ] 5. Merge `test-parallel-code` into `main`
+- [ ] 6. Push updated `main` to origin
+- [ ] 7. Verify with `git log --oneline --graph`, `git status`, `git branch -a`
+- [ ] 8. (Optional) Delete `test-parallel-code` branch
