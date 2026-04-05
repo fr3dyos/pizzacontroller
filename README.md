@@ -1,6 +1,6 @@
 # PizzaController - ESP32 NEMA23 Stepper Motor Controller with FastAccelStepper
 
-This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32 microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for high-performance, non-blocking motor control with smooth acceleration/deceleration and is configured for maximum microstepping (1/256) to achieve precise positioning control. It includes an LCD menu system for easy operation, analog keypad for direct position buttons, and has been optimized for low latency and better performance using enums instead of magic numbers.
+This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32 microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for high-performance, non-blocking motor control with smooth acceleration/deceleration and is configured for maximum microstepping (1/256) to achieve precise positioning control. It includes an LCD menu system for easy operation, analog keypad for direct position buttons, and has been optimized for low latency and better performance.
 
 ## Hardware Requirements
 

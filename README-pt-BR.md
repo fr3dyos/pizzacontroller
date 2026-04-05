@@ -1,14 +1,17 @@
 # PizzaController - Controlador de Motor de Passo NEMA23 com ESP32 e FastAccelStepper
 
-Este projeto fornece um sketch completo do Arduino para controlar um motor de passo NEMA23 usando um microcontrolador ESP32 e um driver DM556. O programa usa a biblioteca AccelStepper para aceleração/desaceleração suave e está configurado para microstepping máximo (1/256) para alcançar controle de posicionamento preciso. Inclui um sistema de menu LCD para operação fácil e foi otimizado para melhor manutenção do código usando enums em vez de números mágicos.
+Este projeto fornece um sketch completo do Arduino para controlar um motor de passo NEMA23 usando um microcontrolador ESP32 e um driver DM556. O programa usa a biblioteca AccelStepper para aceleração/desaceleração suave e está configurado para microstepping máximo (1/256) para alcançar controle de posicionamento preciso. Inclui um sistema de menu LCD para operação fácil e foi otimizado para melhor manutenção do código.
 
 ## Requisitos de Hardware
 
-- Placa de Desenvolvimento ESP32
+- Placa de Desenvolvimento ESP32-Wroom
 - Motor de Passo NEMA23
 - Driver DM556
-- Fonte de Alimentação (adequada para seu motor e driver)
-- Fios de Conexão
+- Fonte de Alimentação 24Vdc - 5A
+- Keypad 5 Botões
+- Display LCD 16x2
+- Sensor de Home de efeito Hall A3144 
+- Botoeira personalizada para funcção de posição direta
 
 ## Conexões de Fiação
 
@@ -20,41 +23,64 @@ Conecte o ESP32 ao driver DM556 da seguinte forma:
 - ESP32 GPIO 22 → DM556 MS1
 - ESP32 GPIO 23 → DM556 MS2
 - ESP32 GPIO 25 → DM556 MS3
-- ESP32 GPIO 26 → Interruptor de Limite de Home (ativo baixo, conecte um terminal ao GPIO 26 e o outro ao GND)
+- ESP32 GPIO 26 → Sensor de Limite de Home (ativo baixo, conecte um terminal ao GPIO 26 e o outro ao GND)
 
 ### Botões de Posição Direta
 
-- ESP32 GPIO 12 → Botão de Posição Direta 1 (ativo baixo, conecte ao GND, carrega posição 0)
-- ESP32 GPIO 13 → Botão de Posição Direta 2 (ativo baixo, conecte ao GND, carrega posição 1)
-- ESP32 GPIO 14 → Botão de Posição Direta 3 (ativo baixo, conecte ao GND, carrega posição 2)
-- ESP32 GPIO 15 → Botão de Posição Direta 4 (ativo baixo, conecte ao GND, carrega posição 3)
-- ESP32 GPIO 16 → Botão de Posição Direta 5 (ativo baixo, conecte ao GND, carrega posição 4)
+- ESP32 GPIO 34 → Botoeira de Posição Direta 
+
+### Keypad de Navegação
+
+- ESP32 GPIO 35 → Botoeira de Posição Direta 
+
+### Dysplay LCD 16x2 via I2C
+
+- ESP32 GPIO 25 → SDA (Serial Data)
+- ESP32 GPIO 26 → SCL (Serial clock)
 
 ### Configuração dos Interruptores DIP do DM556
 
+
+
 O driver DM556 usa interruptores DIP para configurar microstepping e outras configurações. Para este projeto (microstepping 1/256), configure os interruptores da seguinte forma:
 
-- **SW1 (MS1):** LIGADO
-- **SW2 (MS2):** LIGADO
-- **SW3 (MS3):** LIGADO
-- **SW4-SW8:** Consulte o manual do seu DM556 para corrente e outras configurações (tipicamente DESLIGADO para corrente padrão)
+#### Corrente
 
-**Nota:** Certifique-se de que os interruptores DIP correspondam aos pinos de microstepping definidos no código ESP32 (MS1, MS2, MS3 todos ALTO para 1/256).
+Configuração para Motor NEMA23, 4.01A :
+- **SW1 (MS1):** OFF
+- **SW2 (MS2):** ON
+- **SW3 (MS3):** OFF
+- **SW4 (MS4):** ON (corrente completa)
+
+#### Steps
+
+Configuração para 1600 pulsos/revolução:
+
+- **SW5 (MS5):** OFF
+- **SW6 (MS6):** OFF
+- **SW7 (MS7):** ON
+- **SW8 (MS8):** ON
 
 ### Conexões de Energia
 
-- **Energia do Driver DM556:** Conecte uma fonte de alimentação DC adequada (tipicamente 24V-48V DC, verifique as especificações do seu motor) aos terminais de entrada de energia do DM556 (+V e GND).
-- **Energia do Motor de Passo:** As fases do motor (A+, A-, B+, B-) são conectadas diretamente às saídas do driver DM556.
-- **Energia do ESP32:** Alimente o ESP32 via USB ou uma fonte separada de 5V/3.3V. Certifique-se de que a fonte de alimentação possa lidar com os requisitos de corrente.
+- **Energia do Driver DM556:** fonte de alimentação 24VDC, 5A conectada aos terminais de entrada de energia do DM556 (+V e GND).
+- **Energia do Motor de Passo:** As fases do motor (A+, A-, B+, B-) são conectadas diretamente às saídas do driver DM556, por meio de um conector Permak (binoculo 4 vias), seguindo o código de cores explicado na tabela.
 
-**Nota:** Ajuste os pinos GPIO no código se sua fiação for diferente. Garanta classificações adequadas de energia para evitar danos.
+| Fases | Motor     | DM556     |
+|-------|-----------|-----------|
+| A+    | Vermelho  | Vermelho  |
+| A-    | Preto     | Preto     |
+| B+    | Verde     | Azul      |
+| B-    | Amarelo   | Branco    |
+
+- **Energia do ESP32:** o ESP32 é alimentado pela mesma fonte, porém, passando por uma placa de regulação de voltagem LM2596 Step-Down, ajustada para aplicar 5V na porta de alimentação. Se for trocado certifique que a nova placa esteja regulada para 5V antes de qualquer conexão com a ESP32.
 
 ## Configuração de Software
 
 1. Instale o Arduino IDE
 2. Instale o suporte à placa ESP32 no Arduino IDE
 3. Instale as bibliotecas necessárias: AccelStepper, Preferences, Wire, LiquidCrystal_I2C
-4. Abra `PizzaController_AccelStepper/PizzaController_AccelStepper.ino` no Arduino IDE
+4. Abra `PizzaController_FastStepper/PizzaController_FastStepper.ino` no Arduino IDE
 5. Selecione a placa ESP32 correta e a porta
 6. Faça o upload do sketch
 
@@ -62,7 +88,7 @@ O driver DM556 usa interruptores DIP para configurar microstepping e outras conf
 
 O programa está configurado para:
 - **Microstepping:** 1/256 (precisão máxima)
-- **Passos por Revolução:** 51200 (200 passos completos × 256 microsteps)
+- **Passos por Revolução:** 1600 
 - **Velocidade:** Ajustável via constante `SPEED_DELAY` (atualmente 500 microssegundos entre passos)
 
 ## Funcionalidade do Programa
