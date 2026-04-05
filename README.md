@@ -1,15 +1,17 @@
 # PizzaController - ESP32 NEMA23 Stepper Motor Controller with FastAccelStepper
 
-This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32 microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for high-performance, non-blocking motor control with smooth acceleration/deceleration and is configured for maximum microstepping (1/256) to achieve precise positioning control. It includes an LCD menu system for easy operation, analog keypad for direct position buttons, and has been optimized for low latency and better performance.
+This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32-Wroom microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for high-performance, non-blocking motor control with smooth acceleration/deceleration and is configured for 1/256 microstepping to achieve precise positioning control. It includes an LCD menu system for easy operation, 5-button keypads for navigation and direct positions, home sensor, and has been optimized for low latency and better performance.
 
 ## Hardware Requirements
 
-- ESP32 Development Board
-- NEMA23 Stepper Motor
+- ESP32-Wroom Development Board
+- NEMA23 Stepper Motor (4.01A)
 - DM556 Stepper Driver
-- Power Supply (appropriate for your motor and driver)
-- Connecting Wires
-- Optional: Home Limit Switch (active low)
+- Power Supply 24Vdc - 5A
+- 5-Button Keypad (navigation)
+- 16x2 LCD Display (I2C)
+- A3144 Hall Effect Home Sensor
+- Custom direct position buttons
 
 ## Wiring Connections
 
@@ -21,77 +23,95 @@ Connect the ESP32 to the DM556 driver as follows:
 - ESP32 GPIO 22 → DM556 MS1
 - ESP32 GPIO 23 → DM556 MS2
 - ESP32 GPIO 25 → DM556 MS3
-- ESP32 GPIO 26 → Home Limit Switch (active low, connect one terminal to GPIO 26 and the other to GND)
+- ESP32 GPIO 26 → Home Limit Sensor (active low, one terminal to GPIO 26 and the other to GND)
 
-### Direct Position Buttons (Analog Keypad)
+### Direct Position Buttons
 
-- ESP32 GPIO 34 → Direct Position Analog Keypad (ADC input for 5-button keypad)
-  - Button 1: Loads position 0
-  - Button 2: Loads position 1
-  - Button 3: Loads position 2
-  - Button 4: Loads position 3
-  - Button 5: Loads position 4
+- ESP32 GPIO 34 → Direct Position Buttons
+
+### Navigation Keypad
+
+- ESP32 GPIO 35 → Navigation Keypad
+
+### LCD 16x2 I2C Display
+
+- ESP32 GPIO 25 → SDA (Serial Data)
+- ESP32 GPIO 26 → SCL (Serial Clock)
+**Note:** GPIO 25/26 used for both MS3/home and LCD I2C – verify code configuration.
 
 ### DM556 DIP Switch Configuration
 
-The DM556 driver uses DIP switches to configure microstepping and other settings. For this project (1/256 microstepping), set the switches as follows:
+#### Current (NEMA23, 4.01A)
 
-- **SW1 (MS1):** ON
-- **SW2 (MS2):** ON
-- **SW3 (MS3):** ON
-- **SW4-SW8:** Refer to your DM556 manual for current and other settings (typically OFF for default current)
+- **SW1:** OFF
+- **SW2:** ON
+- **SW3:** OFF
+- **SW4:** ON (full current)
 
-**Note:** Ensure the DIP switches match the microstepping pins set in the ESP32 code (MS1, MS2, MS3 all HIGH for 1/256).
+#### Steps (1600 pulses/revolution)
+
+- **SW5:** OFF
+- **SW6:** OFF
+- **SW7:** ON
+- **SW8:** ON
 
 ### Power Connections
 
-- **DM556 Driver Power:** Connect a suitable DC power supply (typically 24V-48V DC, check your motor specifications) to the DM556 power input terminals (+V and GND).
-- **Stepper Motor Power:** The motor phases (A+, A-, B+, B-) are connected directly to the DM556 driver outputs.
-- **ESP32 Power:** Power the ESP32 via USB or a separate 5V/3.3V supply. Ensure the power supply can handle the current requirements.
+- **DM556 Driver Power:** 24VDC, 5A power supply connected to DM556 power input terminals (+V and GND).
+- **Stepper Motor Phases:** Connected to DM556 outputs via Permak 4-pin connector (binocular), following color code:
 
-**Note:** Adjust the GPIO pins in the code if your wiring differs. Ensure proper power ratings to avoid damage.
+| Phase | Motor Color | DM556 Color |
+|-------|-------------|-------------|
+| A+    | Red         | Red         |
+| A-    | Black       | Black       |
+| B+    | Green       | Blue        |
+| B-    | Yellow      | White       |
+
+- **ESP32 Power:** Powered from same source through LM2596 Step-Down regulator adjusted to 5V on power pin. Ensure new regulator is set to 5V before connecting to ESP32.
+
+**Note:** Adjust GPIO pins in code if wiring differs. Verify power ratings to avoid damage.
 
 ## Software Setup
 
-1. Install the Arduino IDE
-2. Install the ESP32 board support in Arduino IDE
-3. Install the required libraries: AccelStepper, Preferences, Wire, LiquidCrystal_I2C
-4. Open `PizzaController_AccelStepper/PizzaController_AccelStepper.ino` in Arduino IDE
-5. Select the correct ESP32 board and port
+1. Install Arduino IDE
+2. Install ESP32 board support in Arduino IDE
+3. Install libraries: FastAccelStepper, Preferences, Wire, LiquidCrystal_I2C
+4. Open `PizzaController_FastStepper/PizzaController_FastStepper.ino` in Arduino IDE
+5. Select correct ESP32 board and port
 6. Upload the sketch
 
 ## Configuration
 
 The program is configured for:
 - **Microstepping:** 1/256 (maximum precision)
-- **Steps per Revolution:** 51200 (200 full steps × 256 microsteps)
+- **Pulses per Revolution:** 1600
 - **Speed:** Adjustable via `SPEED_DELAY` constant (currently 500 microseconds between steps)
 
 ## Program Functionality
 
-The program initializes the stepper motor controller and continuously monitors for serial commands to control the motor. It supports jogging, position management, homing, and testing functions. The motor can be controlled remotely via serial commands or programmatically using the provided functions.
+The program initializes the stepper motor controller and continuously monitors serial commands for motor control. It supports jogging, position management, homing, and testing. Motor controlled remotely via serial or programmatically.
 
 ## New Features Added
 
 ### Jog Function
-- `jog(steps, direction)`: Move the motor a specific number of steps in the specified direction
-- Direction: `true` for clockwise, `false` for counterclockwise
+- `jog(steps, direction)`: Move specific number of steps in specified direction
+- Direction: `true` clockwise, `false` counterclockwise
 
 ### Position Saving
-- `savePosition()`: Save the current position to non-volatile memory (survives power cycles)
-- Positions are automatically loaded on startup
+- `savePosition()`: Save current position to non-volatile memory (persists across power cycles)
+- Positions loaded automatically on startup
 
 ### Homing Function
-- `home()`: Move the motor back to the home position (position 0)
-- Calculates the required movement based on current position
+- `home()`: Move to home position (0)
+- Calculates movement based on current position
 
 ### Reset Home Function
-- `resetHome()`: Set the current position as the new home position (0)
-- Useful for recalibrating the home reference point
+- `resetHome()`: Set current position as new home (0)
+- Useful for recalibrating reference
 
 ### Position Tracking
-- Real-time position tracking relative to home
-- Persistent storage using ESP32 Preferences library
+- Real-time position relative to home
+- Persistent storage via ESP32 Preferences library
 
 ## Usage Examples
 
@@ -106,120 +126,106 @@ jog(500, false);
 
 ### Position Management
 ```cpp
-// Move to a specific position
+// Move to specific position
 moveSteps(2500, true);
 
-// Save the current position
+// Save current position
 savePosition();
 
 // Return to home
 home();
 
-// Set current position as new home
+// Set current as new home
 resetHome();
 ```
 
 ### Serial Command Examples
-The program supports serial commands for remote control. Open the Serial Monitor at 115200 baud and send commands (case-sensitive, followed by newline):
+Open Serial Monitor at 115200 baud, send commands (case-sensitive + newline):
 
-- `JOG F <steps>`: Jog forward (clockwise) by the specified number of steps (e.g., `JOG F 1000`)
-- `JOG B <steps>`: Jog backward (counterclockwise) by the specified number of steps (e.g., `JOG B 500`)
-- `MOVE_TO <position>`: Move to an absolute position (e.g., `MOVE_TO 2500`)
-- `HOME`: Move to the home position (position 0)
-- `FIND_HOME`: Find home using the limit switch connected to GPIO 26
-- `RESET_HOME`: Set the current position as the new home position
-- `SAVE_POS <num>`: Save the current position to slot 0-4 (e.g., `SAVE_POS 1`)
-- `LOAD_POS <num>`: Load position from slot 0-4 (e.g., `LOAD_POS 1`)
-- `GET_POS`: Get the current position
-- `TEST <steps>`: Start the test function with the specified number of steps (e.g., `TEST 1000`)
-- `RUN_TEST <steps>`: Start the test function with the specified number of steps (e.g., `RUN_TEST 1000`)
-- `STOP`: Stop the test function
+- `JOG F <steps>`: Jog forward (e.g., `JOG F 1000`)
+- `JOG B <steps>`: Jog backward (e.g., `JOG B 500`)
+- `MOVE_TO <position>`: Move absolute (e.g., `MOVE_TO 2500`)
+- `HOME`: To home (0)
+- `FIND_HOME`: Find home via GPIO 26 switch
+- `RESET_HOME`: Current as new home
+- `SAVE_POS <num>`: Save to slot 0-4 (e.g., `SAVE_POS 1`)
+- `LOAD_POS <num>`: Load from slot 0-4
+- `GET_POS`: Current position
+- `TEST <steps>` / `RUN_TEST <steps>`: Test mode
+- `STOP`: Stop test
 
-Any other input will respond with "Unknown command".
+Other input: "Unknown command".
 
-### Demo Function Examples
-Add these function calls to the `loop()` function or call them from serial commands for demonstration:
-
+### Demo Functions
 ```cpp
-// In loop() or setup() for automatic demo
-demoJog();        // Performs jogging back and forth
-delay(2000);      // Wait 2 seconds
-demoSaveAndHome(); // Demonstrates saving position, homing, and resetting home
+demoJog();              // Jog back and forth
+delay(2000);
+demoSaveAndHome();      // Save, home, reset demo
 ```
 
 ## Customization
 
-- Modify `SPEED_DELAY` to change motor speed (lower values = faster)
-- Adjust the number of steps in the loops for different rotation angles
-- Uncomment the `AccelStepper` library include for advanced features
-- Use the `moveSteps()` function for custom movements
+- Change `SPEED_DELAY` (lower = faster)
+- Adjust loop steps for rotation angles
+- `moveSteps()` for custom moves
 
 ## Serial Debugging
 
-The program outputs status messages to the Serial Monitor at 115200 baud. Open the Serial Monitor in Arduino IDE to view debug information.
+Status messages at 115200 baud in Serial Monitor.
 
 ## Safety Notes
 
-- Ensure proper power supply ratings for your motor and driver
-- Verify wiring connections before powering on
-- Start with low speeds and gradually increase as needed
-- Monitor motor temperature during operation
+- Proper PSU ratings for motor/driver
+- Verify wiring before power-on
+- Start low speeds, increase gradually
+- Monitor motor temperature
 
 ## Troubleshooting
 
-- If the motor doesn't move, check ENABLE pin (should be LOW to enable)
-- Verify microstepping pins (MS1, MS2, MS3) are set correctly for 1/256 mode
-- Ensure adequate power supply voltage and current
-- Check Serial Monitor for initialization messages
+- Motor not moving: Check ENABLE LOW
+- Microstepping pins for 1/256
+- Adequate PSU voltage/current
+- Serial Monitor init messages
 
 ## Code Optimizations
 
-The code has been optimized for better maintainability and readability:
-
-- **Enum Usage:** Replaced magic numbers with descriptive enum values (`NONE`, `JOG`, `SPEED`, `ACCEL`, `SAVE_POS`, `GOTO`, `GOTO_SAVED`) for menu states
-- **FastAccelStepper Library:** Uses the FastAccelStepper library for high-performance, non-blocking motor control with smooth acceleration/deceleration
-- **Analog Keypad:** Direct position buttons use analog keypad instead of digital pins for better integration
-- **Interrupt-Driven Homing:** Optimized homing with interrupt-based limit switch detection
-- **Serial Buffering:** Smart serial output buffering to avoid blocking motor operations
-- **Persistent Settings:** Motor parameters (steps per revolution, max speed, acceleration) are saved to non-volatile memory
-- **Modular Functions:** Code is organized into logical functions for better readability and maintenance
+- **Enums:** Descriptive states replace magic numbers
+- **FastAccelStepper:** Non-blocking high-perf control
+- **Analog Keypads:** Better integration
+- **Interrupt Homing:** Efficient limit detection
+- **Serial Buffering:** No motor blocking
+- **Persistent Params:** Steps/speed/accel saved NVM
+- **Modular Code:** Logical functions
 
 ## LCD Menu System
 
-The controller includes a user-friendly LCD menu system for easy operation without a computer. The 16x2 I2C LCD displays menu options, and a 5-button analog keypad allows navigation and input.
+16x2 I2C LCD with 5-button keypad for standalone operation.
 
 ### Menu Options
-
-1. **Jog**: Manually move the motor by entering the number of steps
-2. **Change Speed**: Adjust the maximum speed setting
-3. **Change Accel**: Adjust the acceleration setting
-4. **Home**: Move the motor to the home position (0)
-5. **Reset Home**: Set the current position as the new home (requires confirmation)
-6. **Save Position**: Save the current position to one of 5 slots (requires confirmation)
-7. **Go to Position**: Move to an absolute position (can be negative)
-8. **Go to Saved Position**: Load a saved position from one of 5 slots
+1. Jog (manual steps)
+2. Change Speed
+3. Change Acceleration
+4. Home
+5. Reset Home (confirm)
+6. Save Position (slot, confirm)
+7. Go to Position (absolute)
+8. Go to Saved Position
 
 ### Keypad Controls
+- Up/Down: Navigate
+- Left/Right: ±10
+- Up/Down sub: ±100
+- Select: Enter/execute
 
-- **Up/Down**: Navigate through menu items
-- **Left/Right**: Adjust values in sub-menus (increment/decrement by 10)
-- **Up/Down in sub-menu**: Adjust values by 100
-- **Select**: Enter sub-menu or execute action
-
-### Menu Navigation
-
-1. Use Up/Down buttons to select a menu item
-2. Press Select to enter the sub-menu for that item
-3. Use Left/Right/Up/Down to adjust the value
-4. Press Select again to execute the action and return to the main menu
+### Note
+LCD menu not implemented in current `PizzaController_FastStepper.ino` – may be in development.
 
 ## Advanced Features
 
-For more advanced control, consider:
-- Adding position feedback with encoders
-- Implementing acceleration/deceleration profiles
-- Adding limit switches for homing
-- Integrating with other control systems via serial communication
+- Encoder position feedback
+- Accel/decel profiles
+- Limit switches
+- Serial integration
 
 ## Author
 
