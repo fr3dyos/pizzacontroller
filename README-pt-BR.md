@@ -36,18 +36,40 @@ Conecte o ESP32 ao driver DM556 da seguinte forma:
 - ESP32 GPIO 26 → SCL (Serial clock)
 
 
-## Mapa de Pinos do ESP32
+## Mapa de Conexões
 
-| GPIO | Função                     |
-|------|----------------------------|
-| 18   | STEP DM556                 |
-| 19   | DIR DM556                  |
-| 21   | ENABLE DM556 (ativo baixo) |
-| 25   | SDA I2C LCD 16x2           |
-| 26   | SCL I2C LCD 16x2           |
-| 27   | Sensor de Home             |
-| 34   | Botão posição direta (A)   |
-| 35   | Keypad analógico navegação |
+| Componente           | Pino    | Conectado a                                     |
+| -------------------- | ------- | ----------------------------------------------- |
+| ESP32                | GPIO 18 | DM556 STEP                                      |
+| ESP32                | GPIO 19 | DM556 DIR                                       |
+| ESP32                | GPIO 21 | DM556 ENABLE (ativo em nível baixo)             |
+| ESP32                | GPIO 25 | LCD I2C SDA                                     |
+| ESP32                | GPIO 26 | LCD I2C SCL                                     |
+| ESP32                | GPIO 27 | Sensor Hall A3144 Home (3,3 V)                  |
+| ESP32                | GPIO 34 | Botões de Posição Direta (analógico 5 posições) |
+| ESP32                | GPIO 35 | Keypad de Navegação (analógico)                 |
+| ESP32                | 5V      | Saída +5 V do LM2596 (out+)                     |
+| ESP32                | GND     | GND LM2596 (out-), GND da Fonte de Alimentação  |
+| Fonte de Alimentação | +24V    | DM556 +V, LM2596 in+                            |
+| Fonte de Alimentação | GND     | DM556 GND, GND ESP32, LM2596 in-                |
+| Fonte de Alimentação | L, N    | 85–256 VAC 50/60 Hz                             |
+| DM556                | A+      | Motor Vermelho                                  |
+| DM556                | A-      | Motor Preto                                     |
+| DM556                | B+      | Motor Verde                                     |
+| DM556                | B-      | Motor Amarelo                                   |
+| Sensor Hall          | Sinal   | ESP32 GPIO 27                                   |
+| Sensor Hall          | VCC     | 3,3 V                                           |
+| Sensor Hall          | GND     | GND                                             |
+| LCD I2C              | SDA     | ESP32 GPIO 25                                   |
+| LCD I2C              | SCL     | ESP32 GPIO 26                                   |
+| LCD I2C              | VCC     | 5 V (LM2596)                                    |
+| LCD I2C              | GND     | GND                                             |
+| Botões Diretos       | Sinal   | ESP32 GPIO 34                                   |
+| Botões Diretos       | VCC     | 3,3 V                                           |
+| Botões Diretos       | GND     | GND                                             |
+| Keypad Navegação     | Sinal   | ESP32 GPIO 35                                   |
+| Keypad Navegação     | VCC     | 3,3 V                                           |
+| Keypad Navegação     | GND     | GND                                             |
 
 ### Configuração dos Interruptores DIP do DM556
 
@@ -184,7 +206,7 @@ O controlador inclui um sistema de menu LCD amigável para operação fácil sem
 ## Autor
 
 Eng. Fredy Osorio 
-
+ing.fredyosorio@gmai.com
 Rio de Janeiro - Brasil, abril de 2026.
 
 

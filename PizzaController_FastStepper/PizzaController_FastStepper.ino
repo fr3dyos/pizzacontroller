@@ -1,4 +1,4 @@
-// PizzaController_FastAccelStepper_FIXED.ino
+// PizzaController_FastAccelStepper.ino
 // ESP32 Stepper Controller with DM556 Driver - PRODUCTION-READY VERSION
 // Features: Non-blocking control, anti-overheating, position saving, LCD menu, optimized for speed
 // Fixes Applied: ISR safety, non-blocking I/O, motor hold logic, array sizing, cached position refresh

@@ -35,18 +35,40 @@ Connect the ESP32 to the DM556 driver as follows:
 - ESP32 GPIO 25 → SDA (Serial Data)
 - ESP32 GPIO 26 → SCL (Serial Clock)
 
-## ESP32 Pin Map
+## Connections Map
 
-| GPIO | Function                    |
-|------|-----------------------------|
-| 18   | STEP DM556                  |
-| 19   | DIR DM556                   |
-| 21   | ENABLE DM556 (active low)   |
-| 25   | SDA I2C LCD 16x2            |
-| 26   | SCL I2C LCD 16x2            |
-| 27   | Home Sensor                 |
-| 34   | Direct position button (A)  |
-| 35   | Analog navigation keypad    |
+| Component      | Pin     | Connected to                          |
+|----------------|---------|---------------------------------------|
+| ESP32          | GPIO 18 | DM556 STEP                            |
+| ESP32          | GPIO 19 | DM556 DIR                             |
+| ESP32          | GPIO 21 | DM556 ENABLE (active low)             |
+| ESP32          | GPIO 25 | LCD I2C SDA                           |
+| ESP32          | GPIO 26 | LCD I2C SCL                           |
+| ESP32          | GPIO 27 | A3144 Hall Home Sensor (3.3V)         |
+| ESP32          | GPIO 34 | Direct Position Buttons (5-pos analog)|
+| ESP32          | GPIO 35 | Navigation Keypad (analog)            |
+| ESP32          | 5v      | 5V LM2596 out+                        |
+| ESP32          | GND     | GND LM2596 out-,  Power Supply GND    |
+| Power Supply   | +24V    | DM556 +V , LM2596 in+                 |
+| Power Supply   | GND     | DM556 GND, ESP32 GND, LM2596 in-      |
+| Power Supply   | L, N    | 85-256VAC 50/60Hz                     |
+| DM556          | A+      | Motor Red                             |
+| DM556          | A-      | Motor Black                           |
+| DM556          | B+      | Motor Green                           |
+| DM556          | B-      | Motor Yellow                          |
+| Hall Sensor    | Signal  | ESP32 GPIO 27                         |
+| Hall Sensor    | VCC     | 3.3V                                  |
+| Hall Sensor    | GND     | GND                                   |
+| LCD I2C        | SDA     | ESP32 GPIO 25                         |
+| LCD I2C        | SCL     | ESP32 GPIO 26                         |
+| LCD I2C        | VCC     | 5V (LM2596)                           |
+| LCD I2C        | GND     | GND                                   |
+| Direct Buttons | Signal  | ESP32 GPIO 34                         |
+| Direct Buttons | VCC     | 3.3V                                  |
+| Direct Buttons | GND     | GND                                   |
+| Nav Keypad     | Signal  | ESP32 GPIO 35                         |
+| Nav Keypad     | VCC     | 3.3V                                  |
+| Nav Keypad     | GND     | GND                                   |
 
 ### DM556 DIP Switch Configuration
 
@@ -180,5 +202,5 @@ The controller includes a user-friendly LCD menu system for standalone operation
 ## Author
 
 Eng. Fredy Osorio
-
+ing.fredyosorio@gmai.com
 Rio de Janeiro - Brazil, April 2026.
