@@ -80,5 +80,5 @@ logs/
 *.dll
 *.so
 # test files
-PizzaController_Acc*
+PizzaController_AccelStepper
 TODO.md
