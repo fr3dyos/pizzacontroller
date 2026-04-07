@@ -12,7 +12,9 @@ Pin assignments for PizzaController based on current hardware configuration.
 | 25 | SDA | LCD I2C SDA | I2C | Address 0x27 |
 | 26 | SCL | LCD I2C SCL | I2C | 16x2 display |
 | 27 | HOME | A3144 Hall Sensor | Analog In | Threshold <1500, 3.3V |
-| 34 | DIRECT_BTN | 5-pos Direct Buttons | Analog In (ADC1_CH6) | Thresholds: 320/1000/1800/2800/3600 |
+| 32 | ACTION_BTN | Action Buttons CW/CCW | Analog In (ADC2_CH4) | Thresholds: 300/900 |
+| 33 | ESTOP | Emergency Stop Button | Digital In | Active LOW, immediate stop |
+| 34 | DIRECT_BTN | 5-pos Direct Buttons | Analog In (ADC1_CH6) | Thresholds: 320/1000/1800/2800/3600, Position slots 0-4 |
 | 35 | KEYPAD | Navigation Keypad | Analog In (ADC1_CH7) | Thresholds: 220/800/1400/2300/3600 |
 
 ## Power Connections

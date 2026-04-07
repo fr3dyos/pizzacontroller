@@ -22,9 +22,17 @@ Connect the ESP32 to the DM556 driver as follows:
 - ESP32 GPIO 21 → DM556 ENABLE (active low)
 - ESP32 GPIO 27 → Home Limit Sensor
 
-### Direct Position Buttons
+### Direct Position Buttons (Slot Selection)
 
-- ESP32 GPIO 34 → 5-position Direct Position Buttons (analog read)
+- ESP32 GPIO 34 → 5-position Direct Buttons (analog) - selects position slots 0-4
+
+### Action Buttons (CW/CCW)
+
+- ESP32 GPIO 32 → Action buttons for CW/CCW move to selected position
+
+### Emergency Stop
+
+- ESP32 GPIO 33 → E-Stop button (digital, active LOW) - immediate motor stop
 
 ### Navigation Keypad
 
@@ -170,7 +178,11 @@ The program generates status messages in Serial Monitor at 115200 baud. Open Ser
 - Start with low speeds and increase gradually as needed
 - Monitor motor temperature during operation
 
-## LCD Menu System
+## LCD Menu System & Status Display
+
+**LCD1 (0x27):** Main menu system - standalone operation (GPIO 25/26 I2C)
+
+**LCD2 (0x3F):** Status display - shows "Ready Sel:X", "Moving...", "Idle", "Homing..." (GPIO 25/26 I2C)
 
 The controller includes a user-friendly LCD menu system for standalone operation without a computer. The 16x2 I2C LCD displays menu options, and a 5-button analog keypad allows navigation and input.
 

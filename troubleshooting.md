@@ -47,7 +47,20 @@ This guide helps diagnose and resolve common issues with PizzaController (ESP32,
 
 ---
 
-## Buttons/Keypad Not Responding
+## Direct/Action/E-Stop Buttons Not Responding
+
+1. **Pins and Power**
+   - GPIO 34: Direct 5-pos buttons (analog, 3.3V VCC, common GND) - position slots 0-4
+   - GPIO 32: Action buttons (analog, 3.3V) - CW/CCW moves
+   - GPIO 33: E-Stop (digital INPUT_PULLUP, active LOW)
+   - Measure voltage GPIO 34/32 to GND per button; levels must differ
+
+2. **Code Analog Thresholds**
+   ```
+   ACTION: 300/900 (CW/CCW)
+   DIRECT: 320/1000/1800/2800/3600
+   ```
+
 
 1. **Pins and Power**
    - GPIO 34: Direct 5-pos buttons (analog, 3.3V VCC, common GND).

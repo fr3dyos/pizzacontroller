@@ -49,7 +49,20 @@ Siga os passos por categoria de problema, do mais simples para o mais provável.
 
 ---
 
-## Botões/Keypad Não Respondem
+## Botões Diretos/Ação/E-Stop Não Respondem
+
+1. **Pinos e alimentação**
+   - GPIO 34: Botões diretos 5-posições (analógico, VCC 3,3V, GND comum) - slots 0-4
+   - GPIO 32: Botões ação (analógico, 3,3V) - CW/CCW
+   - GPIO 33: E-Stop (digital INPUT_PULLUP, ativo LOW)
+   - Meça tensão GPIO 34/32 vs GND por botão; níveis devem diferir
+
+2. **Limiares analógicos no código**
+   ```
+   ACTION: 300/900 (CW/CCW)
+   DIRECT: 320/1000/1800/2800/3600
+   ```
+
 
 1. **Pinos e alimentação**
    - GPIO 34: Botões de Posição Direta (analógico, 5 posições, VCC 3,3 V e GND comum).  
