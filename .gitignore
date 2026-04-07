@@ -4,6 +4,9 @@ TODO*
 TODO.md
 TODO-README.md
 PizzaController_AccelStepper
+PizzaController.ino
+motor_Cremona2.ino
+
 *.elf
 *.bin
 *.hex
