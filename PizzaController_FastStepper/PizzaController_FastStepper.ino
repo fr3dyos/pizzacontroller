@@ -47,14 +47,17 @@
 #define ENABLE_PIN      21
 #define HOME_SWITCH_PIN 27
 
-#define LCD_ADDR 0x27
+#define LCD1_ADDR 0x27
+#define LCD2_ADDR 0x3F
 #define LCD_COLS 16
 #define LCD_ROWS 2
-LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
+LiquidCrystal_I2C lcd1(LCD1_ADDR, LCD_COLS, LCD_ROWS);
+LiquidCrystal_I2C lcd2(LCD2_ADDR, LCD_COLS, LCD_ROWS);
 
 #define KEYPAD_PIN 35
 #define DIRECT_KEYPAD_PIN 34
 #define ACTION_BUTTONS_PIN 32
+#define ESTOP_PIN 33  // Digital input, NC button (active LOW)
 
 
 // ============================================================================
@@ -254,6 +257,7 @@ int  readKeypad();
 int  readDirectKeypad();
 int  readHomeSwitch();
 int  readActionButtons();
+int  readEStop();
 void logSmart(const String &msg);
 void motorInfo();
 void help();
@@ -344,13 +348,28 @@ void setup() {
   help();
 
 
+  pinMode(ESTOP_PIN, INPUT_PULLUP);
+  
+  int lastSelectedPosIndex = -1;
+  bool lastMotorState = false;
+  
+  // LCD1 init (main menu)
   Wire.begin(25, 26);
-  lcd.init();
-  lcd.backlight();
-  lcd.setCursor(0, 0);
-  lcd.print(F("Pizza Ctrl FIXED"));
-  lcd.setCursor(0, 1);
-  lcd.print(F("Motor Disabled"));
+  lcd1.init();
+  lcd1.backlight();
+  lcd1.setCursor(0, 0);
+  lcd1.print(F("Pizza Ctrl FIXED"));
+  lcd1.setCursor(0, 1);
+  lcd1.print(F("Motor Disabled"));
+  
+  // LCD2 init (status)
+  lcd2.init();
+  lcd2.backlight();
+  lcd2.setCursor(0, 0);
+  lcd2.print(F("Ready Sel:-"));
+  lcd2.setCursor(0, 1);
+  lcd2.print(F("Idle"));
+  
   delay(2000);
   updateMenuDisplay();
 
@@ -362,6 +381,16 @@ void setup() {
 // MAIN LOOP - OPTIMIZED FOR LOW LATENCY
 // ============================================================================
 void loop() {
+  // E-Stop check - immediate stop if pressed
+  if (readEStop() == LOW) {
+    if (stepper) stepper->forceStop();
+    isMotorMoving = false;
+    isTesting = false;
+    homingState = HOMING_IDLE;
+    disableMotor();
+    logSmart("E-STOP ACTIVATED - Motor stopped");
+  }
+
   // Handle serial commands (non-blocking)
   handleSerialInput();
 
@@ -1061,13 +1090,18 @@ void updateMenuDisplay() {
   long pos = getCurrentPosition();  // Always fresh from stepper
   bool positionChanged = (pos != lastDisplayedPosition);
   bool menuStateChanged = (inSubMenu != lastMenuWasSubMenu) || (menuIndex != lastDisplayedIndex);
+  bool selChanged = (selectedPositionIndex != lastSelectedPosIndex);
+  bool moveChanged = (isMotorMoving != lastMotorState);
+  lastSelectedPosIndex = selectedPositionIndex;
+  lastMotorState = isMotorMoving;
 
   // Skip refresh if nothing changed (saves I2C bus time)
-  if (!positionChanged && !menuStateChanged && !inSubMenu) {
+  if (!positionChanged && !menuStateChanged && !selChanged && !moveChanged && !inSubMenu) {
     return;
   }
 
-  lcd.clear();
+  // LCD1: Main menu
+  lcd1.clear();
 
   if (!inSubMenu) {
     lcd.setCursor(0, 0);
@@ -1085,11 +1119,14 @@ void updateMenuDisplay() {
       menuStr += " Sel:" + String(selectedPositionIndex);
       if (menuStr.length() > 16) menuStr = menuStr.substring(0, 16);
     }
-    lcd.print(menuStr);
+    lcd1.print(menuStr);
 
     lastDisplayedPosition = pos;
     lastDisplayedIndex = menuIndex;
     lastMenuWasSubMenu = false;
+    
+    // LCD2: Status display - update always when main menu updates
+    updateStatusDisplay();
   } else {
     lastMenuWasSubMenu = true;
 
