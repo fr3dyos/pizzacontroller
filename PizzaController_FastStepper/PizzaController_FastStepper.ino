@@ -54,6 +54,7 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
 #define KEYPAD_PIN 35
 #define DIRECT_KEYPAD_PIN 34
+#define ACTION_BUTTONS_PIN 32
 
 
 // ============================================================================
@@ -72,6 +73,13 @@ const int DIRECT_KEYPAD_THRESHOLD_2 = 1000;
 const int DIRECT_KEYPAD_THRESHOLD_3 = 1800;
 const int DIRECT_KEYPAD_THRESHOLD_4 = 2800;
 const int DIRECT_KEYPAD_THRESHOLD_5 = 3600;
+
+// Action buttons thresholds (5 levels for compatibility)
+const int ACTION_THRESHOLD_1 = 300;
+const int ACTION_THRESHOLD_2 = 900;
+const int ACTION_THRESHOLD_3 = 1600;
+const int ACTION_THRESHOLD_4 = 2400;
+const int ACTION_THRESHOLD_5 = 3400;
 
 // Home switch threshold (hall sensor)
 const int HOME_SWITCH_THRESHOLD = 1500;
@@ -193,6 +201,9 @@ bool lastMenuWasSubMenu = false;
 int  lastDisplayedIndex = -1;
 long lastDisplayedPosition = -999999;
 
+// Direct buttons selection state
+int selectedPositionIndex = -1;  // -1=none, 0-4=selected slot
+
 
 // ============================================================================
 // FASTACCELSTEPPER OBJECTS
@@ -242,6 +253,7 @@ void runTestAccel();
 int  readKeypad();
 int  readDirectKeypad();
 int  readHomeSwitch();
+int  readActionButtons();
 void logSmart(const String &msg);
 void motorInfo();
 void help();
@@ -871,23 +883,44 @@ void runTestAccel() {
 void handleDirectButtons() {
   static int lastDirectKey = 0;
   static unsigned long lastDirectKeyTime = 0;
+  static int lastActionKey = 0;
+  static unsigned long lastActionKeyTime = 0;
 
   unsigned long currentTime = millis();
-  int key = readDirectKeypad();
 
-  if (key != lastDirectKey && currentTime - lastDirectKeyTime > debounceDelay) {
-    lastDirectKey = key;
+  // Position selection (GPIO34) - now just selects, no move
+  int posKey = readDirectKeypad();
+  if (posKey != lastDirectKey && currentTime - lastDirectKeyTime > debounceDelay) {
+    lastDirectKey = posKey;
     lastDirectKeyTime = currentTime;
-
-    if (key >= 2 && key <= 5) {
-      logSmart("Direct keypad button " + String(key) + " pressed");
-      loadPositionFromSlot(key - 1);  // Slots are 0-4 for buttons 1-5
-    } else if (key == 1) {
+    if (posKey >= 2 && posKey <= 5) {  // Buttons 2-5 -> slots 1-4 (skip button1 for home)
+      selectedPositionIndex = posKey - 2;  // 0-3 for slots 0-3, button1 reserved
+      logSmart("Position slot " + String(selectedPositionIndex) + " selected (GPIO34)");
+    } else if (posKey == 1) {
       startFindHome();
     }
-  } else if (key == 0) {
+  } else if (posKey == 0) {
     lastDirectKey = 0;
   }
+
+  // Action buttons (GPIO32)
+  int actionKey = readActionButtons();
+  if (actionKey != lastActionKey && currentTime - lastActionKeyTime > debounceDelay) {
+    lastActionKey = actionKey;
+    lastActionKeyTime = currentTime;
+    if (actionKey == 1 && selectedPositionIndex >= 0) {  // CW
+      long target = savedPositions[selectedPositionIndex];
+      startMotorMovement(target);
+      logSmart("CW to position slot " + String(selectedPositionIndex) + ": " + String(target) + " (GPIO32)");
+    } else if (actionKey == 2 && selectedPositionIndex >= 0) {  // CCW
+      long target = -savedPositions[selectedPositionIndex];
+      startMotorMovement(target);
+      logSmart("CCW to position slot " + String(selectedPositionIndex) + ": " + String(target) + " (GPIO32)");
+    }
+  } else if (actionKey == 0) {
+    lastActionKey = 0;
+  }
+
   updateMenuDisplay();
 }
 
@@ -991,6 +1024,35 @@ int readHomeSwitch() {
   return triggered;
 }
 
+int readActionButtons() {
+  static int readingsA[3] = {0, 0, 0};
+  static int index = 0;
+
+  int currentReading = analogRead(ACTION_BUTTONS_PIN);
+  readingsA[index] = currentReading;
+  index = (index + 1) % 3;
+
+  int sum = readingsA[0] + readingsA[1] + readingsA[2];
+  int avgValue = sum / 3;
+
+  // Calculate standard deviation
+  float variance = 0;
+  for (int i = 0; i < 3; i++) {
+    variance += pow(readingsA[i] - avgValue, 2);
+  }
+  variance /= 3;
+  float stdDev = sqrt(variance);
+
+  int key = 0;  // 0=none, 1=CW, 2=CCW, 3-5=unused/reserved
+  if (stdDev < 50) {
+    if (avgValue < ACTION_THRESHOLD_1) key = 1;  // CW
+    else if (avgValue < ACTION_THRESHOLD_2) key = 2;  // CCW
+    // Thresholds 3-5 reserved for future expansion
+  }
+
+  return key;
+}
+
 
 // ============================================================================
 // LCD MENU DISPLAY
@@ -1017,6 +1079,12 @@ void updateMenuDisplay() {
     lcd.setCursor(0, 1);
     String menuStr = menuItems[menuIndex];
     if (menuStr.length() > 16) menuStr = menuStr.substring(0, 16);
+    
+    // Show selected position if any
+    if (selectedPositionIndex >= 0) {
+      menuStr += " Sel:" + String(selectedPositionIndex);
+      if (menuStr.length() > 16) menuStr = menuStr.substring(0, 16);
+    }
     lcd.print(menuStr);
 
     lastDisplayedPosition = pos;
