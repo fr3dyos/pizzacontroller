@@ -53,9 +53,19 @@ Connect the ESP32 to the DM556 driver as follows:
 | ESP32          | GPIO 25 | LCD I2C SDA                           |
 | ESP32          | GPIO 26 | LCD I2C SCL                           |
 | ESP32          | GPIO 27 | A3144 Hall Home Sensor (3.3V)         |
+| ESP32          | GPIO 32 | Action Buttons (analog)               |
+| ESP32          | GPIO 33 | E-Stop Button                         |
 | ESP32          | GPIO 34 | Direct Position Buttons (5-pos analog)|
 | ESP32          | GPIO 35 | Navigation Keypad (analog)            |
 | ESP32          | 5v      | 5V LM2596 out+                        |
+| LCD I2C 2nd    | SDA     | ESP32 GPIO 25 (0x3F address)          |
+| LCD I2C 2nd    | SCL     | ESP32 GPIO 26 (0x3F address)          |
+| Action Buttons | Signal  | ESP32 GPIO 32                         |
+| Action Buttons | VCC     | 3.3V                                  |
+| Action Buttons | GND     | GND                                   |
+| E-Stop Button  | Signal  | ESP32 GPIO 33                         |
+| E-Stop Button  | VCC     | 3.3V                                  |
+| E-Stop Button  | GND     | GND                                   |
 | ESP32          | GND     | GND LM2596 out-,  Power Supply GND    |
 | Power Supply   | +24V    | DM556 +V , LM2596 in+                 |
 | Power Supply   | GND     | DM556 GND, ESP32 GND, LM2596 in-      |
