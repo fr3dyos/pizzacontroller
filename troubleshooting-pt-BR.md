@@ -86,10 +86,12 @@ Siga os passos por categoria de problema, do mais simples para o mais provável.
 
 ## LCD Não Aparece
 
-1. **Fiação I2C**
-   - SDA → GPIO 25, SCL → GPIO 26.  
-   - VCC do módulo I2C → 5 V (LM2596), GND → GND comum.  
-   - Verifique se SDA/SCL não foram invertidos e se há GND comum entre ESP32, LCD e fonte.
+1. **Fiação I2C (Dual LCD)**
+   - **LCD1 (principal, 0x27):** SDA1 GPIO 25, SCL1 GPIO 26 (Wire/I2C1)
+   - **LCD2 (status, 0x3F):** SDA2 GPIO 22, SCL2 GPIO 23 (Wire2/I2C2)
+   - Ambas VCC → 5V LM2596, GND comum
+   - Adicione pullups 4.7k para 3.3V em cada par SDA/SCL se instável
+   - Verifique sem inversões, GND comum
 
 2. **Endereço I2C**
    - Endereço padrão usado no código: `0x27`.  

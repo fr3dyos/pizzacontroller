@@ -38,10 +38,15 @@ Conecte o ESP32 ao driver DM556 da seguinte forma:
 
 - ESP32 GPIO 35 → Botoeira de Posição Navegação (leitura analógica)
 
-### Display LCD 16x2 via I2C
+### Displays LCD via I2C
 
-- ESP32 GPIO 25 → SDA (Serial Data)
-- ESP32 GPIO 26 → SCL (Serial clock)
+**LCD1 (menu principal, 0x27):**
+- ESP32 GPIO 25 → SDA1
+- ESP32 GPIO 26 → SCL1 (I2C1/Wire)
+
+**LCD2 (status, 0x3F):**
+- ESP32 GPIO 22 → SDA2
+- ESP32 GPIO 23 → SCL2 (I2C2/Wire2)
 
 
 ## Mapa de Conexões

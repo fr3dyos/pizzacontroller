@@ -83,10 +83,12 @@ This guide helps diagnose and resolve common issues with PizzaController (ESP32,
 
 ## LCD Not Displaying
 
-1. **I2C Wiring**
-   - SDA → GPIO 25, SCL → GPIO 26.
-   - I2C VCC → 5V (LM2596), GND common.
-   - Check SDA/SCL not swapped, ESP32/LCD/source GND common.
+1. **I2C Wiring (Dual LCD)**
+   - **LCD1 (main, 0x27):** SDA1 GPIO 25, SCL1 GPIO 26 (Wire/I2C1)
+   - **LCD2 (status, 0x3F):** SDA2 GPIO 22, SCL2 GPIO 23 (Wire2/I2C2)
+   - Both VCC → 5V LM2596, GND common
+   - Add 4.7k pullups to 3.3V on each SDA/SCL pair if unstable
+   - Check no swaps, common GND
 
 2. **I2C Address**
    - Code default: `0x27`.
