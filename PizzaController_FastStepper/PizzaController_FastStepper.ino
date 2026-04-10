@@ -38,8 +38,12 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
+TwoWire Wire2 = TwoWire(1);
+
+
 
 // ============================================================================
+
 // PIN DEFINITIONS
 // ============================================================================
 #define STEP_PIN        18
@@ -51,8 +55,10 @@
 #define LCD2_ADDR 0x3F
 #define LCD_COLS 16
 #define LCD_ROWS 2
+#define LCD2_SDA 22
+#define LCD2_SCL 23
 LiquidCrystal_I2C lcd1(LCD1_ADDR, LCD_COLS, LCD_ROWS);
-LiquidCrystal_I2C lcd2(LCD2_ADDR, LCD_COLS, LCD_ROWS);
+LiquidCrystal_I2C lcd2(LCD2_ADDR, LCD_COLS, LCD_ROWS, &Wire2);
 
 #define KEYPAD_PIN 35
 #define DIRECT_KEYPAD_PIN 34
@@ -355,7 +361,9 @@ void setup() {
   
   // LCD1 init (main menu)
   Wire.begin(25, 26);
+  Wire2.begin(LCD2_SDA, LCD2_SCL);
   lcd1.init();
+
   lcd1.backlight();
   lcd1.setCursor(0, 0);
   lcd1.print(F("Pizza Ctrl FIXED"));
@@ -1104,13 +1112,13 @@ void updateMenuDisplay() {
   lcd1.clear();
 
   if (!inSubMenu) {
-    lcd.setCursor(0, 0);
-    lcd.print(F("Pos:"));
+    lcd1.setCursor(0, 0);
+    lcd1.print(F("Pos:"));
     String posStr = String(pos);
     if (posStr.length() > 10) posStr = posStr.substring(0, 10);
-    lcd.print(posStr);
+    lcd1.print(posStr);
 
-    lcd.setCursor(0, 1);
+    lcd1.setCursor(0, 1);
     String menuStr = menuItems[menuIndex];
     if (menuStr.length() > 16) menuStr = menuStr.substring(0, 16);
     
@@ -1132,18 +1140,18 @@ void updateMenuDisplay() {
 
     switch (subMenuType) {
       case JOG:
-        lcd.setCursor(0, 0);
-        lcd.print(F("Jog: "));
-        lcd.print(inputValue);
-        lcd.setCursor(0, 1);
-        lcd.print(F("L:<  R:>  Sel:X"));
+        lcd1.setCursor(0, 0);
+        lcd1.print(F("Jog: "));
+        lcd1.print(inputValue);
+        lcd1.setCursor(0, 1);
+        lcd1.print(F("L:<  R:>  Sel:X"));
         break;
 
       case SPEED:
-        lcd.setCursor(0, 0);
-        lcd.print(F("Max Speed:"));
-        lcd.setCursor(0, 1);
-        lcd.print(inputValue);
+        lcd1.setCursor(0, 0);
+        lcd1.print(F("Max Speed:"));
+        lcd1.setCursor(0, 1);
+        lcd1.print(inputValue);
         break;
 
       case ACCEL:

@@ -9,8 +9,10 @@ Pin assignments for PizzaController based on current hardware configuration.
 | 18 | STEP | DM556 STEP | Digital Out | Stepper pulses |
 | 19 | DIR | DM556 DIR | Digital Out | Direction control |
 | 21 | ENABLE | DM556 EN | Digital Out | Active LOW enable |
-| 25 | SDA | LCD I2C SDA | I2C | Address 0x27 |
-| 26 | SCL | LCD I2C SCL | I2C | 16x2 display |
+| 25 | SDA1 | LCD1 I2C SDA | I2C1 | Address 0x27 |
+| 26 | SCL1 | LCD1 I2C SCL | I2C1 | Main menu |
+| 22 | SDA2 | LCD2 I2C SDA | I2C2 | Address 0x3F |
+| 23 | SCL2 | LCD2 I2C SCL | I2C2 | Status display |
 | 27 | HOME | A3144 Hall Sensor | Analog In | Threshold <1500, 3.3V |
 | 32 | ACTION_BTN | Action Buttons CW/CCW | Analog In (ADC2_CH4) | Thresholds: 300/900 |
 | 33 | ESTOP | Emergency Stop Button | Digital In | Active LOW, immediate stop |
