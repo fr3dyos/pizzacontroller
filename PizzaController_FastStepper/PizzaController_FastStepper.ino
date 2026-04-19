@@ -58,11 +58,11 @@ TwoWire Wire2 = TwoWire(1);
 #define LCD2_SDA 22
 #define LCD2_SCL 23
 LiquidCrystal_I2C lcd1(LCD1_ADDR, LCD_COLS, LCD_ROWS);
-LiquidCrystal_I2C lcd2(LCD2_ADDR, LCD_COLS, LCD_ROWS, &Wire2);
+LiquidCrystal_I2C lcd2(LCD2_ADDR, LCD_COLS, LCD_ROWS);
 
 #define KEYPAD_PIN 35
 #define DIRECT_KEYPAD_PIN 34
-#define ACTION_BUTTONS_PIN 32
+
 #define ESTOP_PIN 33  // Digital input, NC button (active LOW)
 
 
@@ -76,19 +76,17 @@ const int KEYPAD_THRESHOLD_3 = 1400;
 const int KEYPAD_THRESHOLD_4 = 2300;
 const int KEYPAD_THRESHOLD_5 = 3600;
 
-// Direct keypad thresholds
-const int DIRECT_KEYPAD_THRESHOLD_1 = 320;
-const int DIRECT_KEYPAD_THRESHOLD_2 = 1000;
-const int DIRECT_KEYPAD_THRESHOLD_3 = 1800;
-const int DIRECT_KEYPAD_THRESHOLD_4 = 2800;
-const int DIRECT_KEYPAD_THRESHOLD_5 = 3600;
 
-// Action buttons thresholds (5 levels for compatibility)
-const int ACTION_THRESHOLD_1 = 300;
-const int ACTION_THRESHOLD_2 = 900;
-const int ACTION_THRESHOLD_3 = 1600;
-const int ACTION_THRESHOLD_4 = 2400;
-const int ACTION_THRESHOLD_5 = 3400;
+// Direct keypad thresholds
+const int DIRECT_KEYPAD_THRESHOLD_1 = 130;
+const int DIRECT_KEYPAD_THRESHOLD_2 = 570;
+const int DIRECT_KEYPAD_THRESHOLD_3 = 1170;
+const int DIRECT_KEYPAD_THRESHOLD_4 = 1740;
+const int DIRECT_KEYPAD_THRESHOLD_5 = 2370;
+const int DIRECT_KEYPAD_THRESHOLD_6 = 3100;
+const int DIRECT_KEYPAD_THRESHOLD_7 = 3700;
+
+
 
 // Home switch threshold (hall sensor)
 const int HOME_SWITCH_THRESHOLD = 1500;
@@ -214,6 +212,7 @@ long lastDisplayedPosition = -999999;
 int selectedPositionIndex = -1;  // -1=none, 0-4=selected slot
 
 
+
 // ============================================================================
 // FASTACCELSTEPPER OBJECTS
 // ============================================================================
@@ -262,8 +261,9 @@ void runTestAccel();
 int  readKeypad();
 int  readDirectKeypad();
 int  readHomeSwitch();
-int  readActionButtons();
-int  readEStop();
+int readEStop() {
+  return digitalRead(ESTOP_PIN);
+}
 void logSmart(const String &msg);
 void motorInfo();
 void help();
@@ -792,8 +792,7 @@ void resetHome() {
   preferences.putLong("homePos", homePosition);
   preferences.putLong("currPos", currentPosition);
   logSmart("Home reset. New home offset: " + String(homePosition));
-  homePosition    = currentPosition;
-  preferences.putLong("homePos", homePosition);
+
   logSmart("Current position set to 0");
   updateMenuDisplay();
 }
@@ -930,33 +929,23 @@ void handleDirectButtons() {
   if (posKey != lastDirectKey && currentTime - lastDirectKeyTime > debounceDelay) {
     lastDirectKey = posKey;
     lastDirectKeyTime = currentTime;
-    if (posKey >= 2 && posKey <= 5) {  // Buttons 2-5 -> slots 1-4 (skip button1 for home)
-      selectedPositionIndex = posKey - 2;  // 0-3 for slots 0-3, button1 reserved
+    if (posKey >= 2 && posKey <= 5) {  // Buttons 2-5 -> slots 0-3 
+      selectedPositionIndex = posKey - 2;
       logSmart("Position slot " + String(selectedPositionIndex) + " selected (GPIO34)");
     } else if (posKey == 1) {
       startFindHome();
+    } else if (posKey == 6) {  // CW jog
+      startMotorMovement(getCurrentPosition() + JOG_STEPS);
+      logSmart("Direct CW jog +" + String(JOG_STEPS) + " (GPIO34)");
+    } else if (posKey == 7) {  // CCW jog
+      startMotorMovement(getCurrentPosition() - JOG_STEPS);
+      logSmart("Direct CCW jog -" + String(JOG_STEPS) + " (GPIO34)");
     }
   } else if (posKey == 0) {
     lastDirectKey = 0;
   }
 
-  // Action buttons (GPIO32)
-  int actionKey = readActionButtons();
-  if (actionKey != lastActionKey && currentTime - lastActionKeyTime > debounceDelay) {
-    lastActionKey = actionKey;
-    lastActionKeyTime = currentTime;
-    if (actionKey == 1 && selectedPositionIndex >= 0) {  // CW
-      long target = savedPositions[selectedPositionIndex];
-      startMotorMovement(target);
-      logSmart("CW to position slot " + String(selectedPositionIndex) + ": " + String(target) + " (GPIO32)");
-    } else if (actionKey == 2 && selectedPositionIndex >= 0) {  // CCW
-      long target = -savedPositions[selectedPositionIndex];
-      startMotorMovement(target);
-      logSmart("CCW to position slot " + String(selectedPositionIndex) + ": " + String(target) + " (GPIO32)");
-    }
-  } else if (actionKey == 0) {
-    lastActionKey = 0;
-  }
+
 
   updateMenuDisplay();
 }
@@ -1004,7 +993,7 @@ int readDirectKeypad() {
   static int index = 0;
 
   int currentReading = analogRead(DIRECT_KEYPAD_PIN);
-  //Serial.println(currentReading);
+
   readingsD[index] = currentReading;
   index = (index + 1) % 3;
 
@@ -1027,6 +1016,8 @@ int readDirectKeypad() {
     else if (avgValue < DIRECT_KEYPAD_THRESHOLD_3) key = 3;
     else if (avgValue < DIRECT_KEYPAD_THRESHOLD_4) key = 4;
     else if (avgValue < DIRECT_KEYPAD_THRESHOLD_5) key = 5;
+    else if (avgValue < DIRECT_KEYPAD_THRESHOLD_6) key = 6;
+    else if (avgValue < DIRECT_KEYPAD_THRESHOLD_7) key = 7;
   }
 
   return key;
@@ -1061,34 +1052,7 @@ int readHomeSwitch() {
   return triggered;
 }
 
-int readActionButtons() {
-  static int readingsA[3] = {0, 0, 0};
-  static int index = 0;
 
-  int currentReading = analogRead(ACTION_BUTTONS_PIN);
-  readingsA[index] = currentReading;
-  index = (index + 1) % 3;
-
-  int sum = readingsA[0] + readingsA[1] + readingsA[2];
-  int avgValue = sum / 3;
-
-  // Calculate standard deviation
-  float variance = 0;
-  for (int i = 0; i < 3; i++) {
-    variance += pow(readingsA[i] - avgValue, 2);
-  }
-  variance /= 3;
-  float stdDev = sqrt(variance);
-
-  int key = 0;  // 0=none, 1=CW, 2=CCW, 3-5=unused/reserved
-  if (stdDev < 50) {
-    if (avgValue < ACTION_THRESHOLD_1) key = 1;  // CW
-    else if (avgValue < ACTION_THRESHOLD_2) key = 2;  // CCW
-    // Thresholds 3-5 reserved for future expansion
-  }
-
-  return key;
-}
 
 
 // ============================================================================
@@ -1155,67 +1119,67 @@ void updateMenuDisplay() {
         break;
 
       case ACCEL:
-        lcd.setCursor(0, 0);
-        lcd.print(F("Accel:"));
-        lcd.setCursor(0, 1);
-        lcd.print(inputValue);
+        lcd1.setCursor(0, 0);
+        lcd1.print(F("Accel:"));
+        lcd1.setCursor(0, 1);
+        lcd1.print(inputValue);
         break;
 
       case SAVE_POS: {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Slot "));
-          lcd.print(inputValue + 1);
-          lcd.print(F(": "));
+          lcd1.setCursor(0, 0);
+          lcd1.print(F("Slot "));
+          lcd1.print(inputValue + 1);
+          lcd1.print(F(": "));
           String savedStr = String(savedPositions[inputValue]);
           if (savedStr.length() > 5) savedStr = savedStr.substring(0, 5);
-          lcd.print(savedStr);
-          lcd.setCursor(0, 1);
-          lcd.print(F("Select to Save"));
+          lcd1.print(savedStr);
+          lcd1.setCursor(0, 1);
+          lcd1.print(F("Select to Save"));
           break;
         }
 
       case GOTO: {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Go to Pos:"));
-          lcd.setCursor(0, 1);
-          lcd.print(inputValue);
+          lcd1.setCursor(0, 0);
+          lcd1.print(F("Go to Pos:"));
+          lcd1.setCursor(0, 1);
+          lcd1.print(inputValue);
           break;
         }
 
       case GOTO_SAVED: {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Slot "));
-          lcd.print(inputValue + 1);
-          lcd.print(F(": "));
+          lcd1.setCursor(0, 0);
+          lcd1.print(F("Slot "));
+          lcd1.print(inputValue + 1);
+          lcd1.print(F(": "));
           String loadStr = String(savedPositions[inputValue]);
           if (loadStr.length() > 5) loadStr = loadStr.substring(0, 5);
-          lcd.print(loadStr);
-          lcd.setCursor(0, 1);
-          lcd.print(F("Select to Load"));
+          lcd1.print(loadStr);
+          lcd1.setCursor(0, 1);
+          lcd1.print(F("Select to Load"));
           break;
         }
 
       case CONFIRM_RESET_HOME: {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Reset Home?"));
-          lcd.setCursor(0, 1);
-          lcd.print(F("Sel:Yes  Any:No"));
+          lcd1.setCursor(0, 0);
+          lcd1.print(F("Reset Home?"));
+          lcd1.setCursor(0, 1);
+          lcd1.print(F("Sel:Yes  Any:No"));
           break;
         }
 
       case CONFIRM_SAVE_POS: {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Save to Slot "));
-          lcd.print(inputValue + 1);
-          lcd.print(F("?"));
-          lcd.setCursor(0, 1);
-          lcd.print(F("Sel:Yes  Any:No"));
+          lcd1.setCursor(0, 0);
+          lcd1.print(F("Save to Slot "));
+          lcd1.print(inputValue + 1);
+          lcd1.print(F("?"));
+          lcd1.setCursor(0, 1);
+          lcd1.print(F("Sel:Yes  Any:No"));
           break;
         }
 
       default: {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Menu"));
+          lcd1.setCursor(0, 0);
+          lcd1.print(F("Menu"));
           break;
         }
     }
