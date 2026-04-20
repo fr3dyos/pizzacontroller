@@ -57,6 +57,8 @@ TwoWire Wire2 = TwoWire(1);
 #define LCD_ROWS 2
 #define LCD2_SDA 22
 #define LCD2_SCL 23
+#define LCD1_SDA 25
+#define LCD1_SCL 26
 LiquidCrystal_I2C lcd1(LCD1_ADDR, LCD_COLS, LCD_ROWS);
 LiquidCrystal_I2C lcd2(LCD2_ADDR, LCD_COLS, LCD_ROWS);
 
@@ -204,12 +206,14 @@ unsigned long lastKeyTime = 0;
 const unsigned long debounceDelay = 300;  // Reduced from 200ms for better responsiveness
 
 // LCD refresh tracking (optimization)
-bool lastMenuWasSubMenu = false;
-int  lastDisplayedIndex = -1;
-long lastDisplayedPosition = -999999;
+  bool lastMenuWasSubMenu = false;
+  int  lastDisplayedIndex = -1;
+  long lastDisplayedPosition = -999999;
 
-// Direct buttons selection state
-int selectedPositionIndex = -1;  // -1=none, 0-4=selected slot
+  // Direct buttons selection state
+  int selectedPositionIndex = -1;  // -1=none, 0-4=selected slot
+  int lastSelectedPosIndex = -1;
+  bool lastMotorState = false;
 
 
 
@@ -360,8 +364,7 @@ void setup() {
   bool lastMotorState = false;
   
   // LCD1 init (main menu)
-  Wire.begin(25, 26);
-  Wire2.begin(LCD2_SDA, LCD2_SCL);
+  Wire.begin(LCD1_SDA, LCD1_SCL);
   lcd1.init();
 
   lcd1.backlight();
@@ -371,6 +374,7 @@ void setup() {
   lcd1.print(F("Motor Disabled"));
   
   // LCD2 init (status)
+  Wire2.begin(LCD2_SDA, LCD2_SCL);
   lcd2.init();
   lcd2.backlight();
   lcd2.setCursor(0, 0);
@@ -944,8 +948,6 @@ void handleDirectButtons() {
   } else if (posKey == 0) {
     lastDirectKey = 0;
   }
-
-
 
   updateMenuDisplay();
 }
