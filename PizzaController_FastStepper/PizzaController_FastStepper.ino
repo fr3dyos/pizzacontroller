@@ -38,7 +38,6 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
-TwoWire Wire2 = TwoWire(1);
 
 
 
@@ -51,22 +50,18 @@ TwoWire Wire2 = TwoWire(1);
 #define ENABLE_PIN      21
 #define HOME_SWITCH_PIN 27
 
-#define LCD1_ADDR 0x27
-#define LCD2_ADDR 0x3F
+#define LCD_ADDR 0x27
 #define LCD_COLS 16
 #define LCD_ROWS 2
-#define LCD2_SDA 22
-#define LCD2_SCL 23
-#define LCD1_SDA 25
-#define LCD1_SCL 26
-LiquidCrystal_I2C lcd1(LCD1_ADDR, LCD_COLS, LCD_ROWS);
-LiquidCrystal_I2C lcd2(LCD2_ADDR, LCD_COLS, LCD_ROWS);
+#define LCD_SDA 25
+#define LCD_SCL 26
+LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
 #define KEYPAD_PIN 35
 #define DIRECT_KEYPAD_PIN 34
 
 #define ESTOP_PIN 33  // Digital input, NC button (active LOW)
-
+#define LED_HOME_PIN 32   // Optional: onboard LED for home status indication
 
 // ============================================================================
 // KEYPAD CALIBRATION CONSTANTS
@@ -291,6 +286,7 @@ void logSmart(const String &msg) {
 void setup() {
   pinMode(ENABLE_PIN, OUTPUT);
   pinMode(HOME_SWITCH_PIN, INPUT_PULLUP);
+  pinMode(LED_HOME_PIN, OUTPUT);
   digitalWrite(ENABLE_PIN, HIGH);  // Motor initially disabled
 
   // Note: Home switch is now analog (hall sensor), no interrupt needed
@@ -308,15 +304,7 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   Serial.println(F("\n\n========================================"));
-  Serial.println(F("Pizza Controller - FIXED VERSION"));
-  Serial.println(F("========================================"));
-  Serial.println(F("Fixes Applied:"));
-  Serial.println(F("- ISR-safe interrupt handling"));
-  Serial.println(F("- Non-blocking serial input"));
-  Serial.println(F("- Non-blocking test mode"));
-  Serial.println(F("- Fixed motor hold-time logic"));
-  Serial.println(F("- Array size consistency"));
-  Serial.println(F("- Position cache auto-refresh"));
+  Serial.println(F("Pizza Controller - LOEM PUC-Rio));
   Serial.println(F("========================================\n"));
 
   // Load configuration from NVS (wear-leveled automatically)
@@ -363,24 +351,15 @@ void setup() {
   int lastSelectedPosIndex = -1;
   bool lastMotorState = false;
   
-  // LCD1 init (main menu)
-  Wire.begin(LCD1_SDA, LCD1_SCL);
-  lcd1.init();
+  // LCD init (main menu)
+  Wire.begin(LCD_SDA, LCD_SCL);
+  lcd.begin(Wire);
 
-  lcd1.backlight();
-  lcd1.setCursor(0, 0);
-  lcd1.print(F("Pizza Ctrl FIXED"));
-  lcd1.setCursor(0, 1);
-  lcd1.print(F("Motor Disabled"));
-  
-  // LCD2 init (status)
-  Wire2.begin(LCD2_SDA, LCD2_SCL);
-  lcd2.init();
-  lcd2.backlight();
-  lcd2.setCursor(0, 0);
-  lcd2.print(F("Ready Sel:-"));
-  lcd2.setCursor(0, 1);
-  lcd2.print(F("Idle"));
+lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print(F("  LOEM PUC-Rio  "));
+  lcd.setCursor(0, 1);
+  lcd.print(F("Pizza  Controller"));
   
   delay(2000);
   updateMenuDisplay();
@@ -390,7 +369,7 @@ void setup() {
 
 
 // ============================================================================
-// MAIN LOOP - OPTIMIZED FOR LOW LATENCY
+// MAIN LOOP
 // ============================================================================
 void loop() {
   // E-Stop check - immediate stop if pressed
@@ -435,7 +414,7 @@ void loop() {
   }
 
   // 1ms loop period for responsive control
-  delayMicroseconds(1000);
+  delay(100);
 }
 
 
@@ -648,6 +627,7 @@ void processCommand(String command) {
     int switchState = digitalRead(HOME_SWITCH_PIN);
     Serial.print(F("Home limit switch status: "));
     Serial.println((switchState == LOW) ? F("TRIGGERED") : F("NOT TRIGGERED"));
+    digitalWrite(LED_HOME_PIN, (switchState == LOW) ? HIGH : LOW);  // Optional: LED indication
   }
   else if (command == "HELP") {
     help();
@@ -995,7 +975,7 @@ int readDirectKeypad() {
   static int index = 0;
 
   int currentReading = analogRead(DIRECT_KEYPAD_PIN);
-
+  Serial.println(currentReading);
   readingsD[index] = currentReading;
   index = (index + 1) % 3;
 
@@ -1058,7 +1038,7 @@ int readHomeSwitch() {
 
 
 // ============================================================================
-// LCD MENU DISPLAY
+// LCD MENU DISPLAY - PRIORITIZING DIRECT BUTTON FUNCTIONS
 // ============================================================================
 void updateMenuDisplay() {
   long pos = getCurrentPosition();  // Always fresh from stepper
@@ -1074,118 +1054,159 @@ void updateMenuDisplay() {
     return;
   }
 
-  // LCD1: Main menu
-  lcd1.clear();
+// LCD: Main menu - PRIORITIZING DIRECT BUTTON INFO
+  lcd.clear();
 
-  if (!inSubMenu) {
-    lcd1.setCursor(0, 0);
-    lcd1.print(F("Pos:"));
+  // PRIORITY 1: Show direct button state prominently
+  if (selectedPositionIndex >= 0) {
+    // Slot selected via direct button - show prominently
+    lcd.setCursor(0, 0);
+    lcd.print(F("Sel"));
+    lcd.print(selectedPositionIndex);
+    lcd.print(F("="));
+    // Show saved position for this slot
+    String slotPosStr = String(savedPositions[selectedPositionIndex]);
+    if (slotPosStr.length() > 10) slotPosStr = slotPosStr.substring(0, 10);
+    lcd.print(slotPosStr);
+    
+    // Row 1: Show motor state / ready to load
+    lcd.setCursor(0, 1);
+    if (isMotorMoving) {
+      lcd.print(F("Moving..."));
+    } else if (homingState != HOMING_IDLE) {
+      lcd.print(F("Homing..."));
+    } else {
+      // Show current position
+      String curPosStr = String(pos);
+      if (curPosStr.length() > 14) curPosStr = curPosStr.substring(0, 14);
+      lcd.print(F("Cur:"));
+      lcd.print(curPosStr);
+    }
+  }
+  // PRIORITY 2: Show motor action when moving (from direct buttons)
+  else if (isMotorMoving) {
+    lcd.setCursor(0, 0);
+    lcd.print(F("Pos:"));
     String posStr = String(pos);
     if (posStr.length() > 10) posStr = posStr.substring(0, 10);
-    lcd1.print(posStr);
+    lcd.print(posStr);
+    
+    lcd.setCursor(0, 1);
+    lcd.print(F("Moving..."));
+  }
+  // PRIORITY 3: Show homing state
+  else if (homingState != HOMING_IDLE) {
+    lcd.setCursor(0, 0);
+    lcd.print(F("Pos:"));
+    String posStr = String(pos);
+    if (posStr.length() > 10) posStr = posStr.substring(0, 10);
+    lcd.print(posStr);
+    
+    lcd.setCursor(0, 1);
+    lcd.print(F("Finding Home..."));
+  }
+  // PRIORITY 4: Normal menu mode (when no direct button action)
+  else if (!inSubMenu) {
+    lcd.setCursor(0, 0);
+    lcd.print(F("P:"));
+    String posStr = String(pos);
+    if (posStr.length() > 12) posStr = posStr.substring(0, 12);
+    lcd.print(posStr);
 
-    lcd1.setCursor(0, 1);
+    lcd.setCursor(0, 1);
     String menuStr = menuItems[menuIndex];
     if (menuStr.length() > 16) menuStr = menuStr.substring(0, 16);
-    
-    // Show selected position if any
-    if (selectedPositionIndex >= 0) {
-      menuStr += " Sel:" + String(selectedPositionIndex);
-      if (menuStr.length() > 16) menuStr = menuStr.substring(0, 16);
-    }
-    lcd1.print(menuStr);
-
-    lastDisplayedPosition = pos;
-    lastDisplayedIndex = menuIndex;
-    lastMenuWasSubMenu = false;
-    
-    // LCD2: Status display - update always when main menu updates
-    updateStatusDisplay();
-  } else {
+    lcd.print(menuStr);
+  }
+  // PRIORITY 5: Submenu mode
+  else {
     lastMenuWasSubMenu = true;
 
     switch (subMenuType) {
       case JOG:
-        lcd1.setCursor(0, 0);
-        lcd1.print(F("Jog: "));
-        lcd1.print(inputValue);
-        lcd1.setCursor(0, 1);
-        lcd1.print(F("L:<  R:>  Sel:X"));
+        lcd.setCursor(0, 0);
+        lcd.print(F("Jog Steps:"));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
         break;
 
       case SPEED:
-        lcd1.setCursor(0, 0);
-        lcd1.print(F("Max Speed:"));
-        lcd1.setCursor(0, 1);
-        lcd1.print(inputValue);
+        lcd.setCursor(0, 0);
+        lcd.print(F("Max Speed:"));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
         break;
 
       case ACCEL:
-        lcd1.setCursor(0, 0);
-        lcd1.print(F("Accel:"));
-        lcd1.setCursor(0, 1);
-        lcd1.print(inputValue);
+        lcd.setCursor(0, 0);
+        lcd.print(F("Accel:"));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
         break;
 
       case SAVE_POS: {
-          lcd1.setCursor(0, 0);
-          lcd1.print(F("Slot "));
-          lcd1.print(inputValue + 1);
-          lcd1.print(F(": "));
+          lcd.setCursor(0, 0);
+          lcd.print(F("Slot "));
+          lcd.print(inputValue + 1);
+          lcd.print(F(": "));
           String savedStr = String(savedPositions[inputValue]);
           if (savedStr.length() > 5) savedStr = savedStr.substring(0, 5);
-          lcd1.print(savedStr);
-          lcd1.setCursor(0, 1);
-          lcd1.print(F("Select to Save"));
+          lcd.print(savedStr);
+          lcd.setCursor(0, 1);
+          lcd.print(F("Select to Save"));
           break;
         }
 
       case GOTO: {
-          lcd1.setCursor(0, 0);
-          lcd1.print(F("Go to Pos:"));
-          lcd1.setCursor(0, 1);
-          lcd1.print(inputValue);
+          lcd.setCursor(0, 0);
+          lcd.print(F("Go to Pos:"));
+          lcd.setCursor(0, 1);
+          lcd.print(inputValue);
           break;
         }
 
       case GOTO_SAVED: {
-          lcd1.setCursor(0, 0);
-          lcd1.print(F("Slot "));
-          lcd1.print(inputValue + 1);
-          lcd1.print(F(": "));
+          lcd.setCursor(0, 0);
+          lcd.print(F("Slot "));
+          lcd.print(inputValue + 1);
+          lcd.print(F(": "));
           String loadStr = String(savedPositions[inputValue]);
           if (loadStr.length() > 5) loadStr = loadStr.substring(0, 5);
-          lcd1.print(loadStr);
-          lcd1.setCursor(0, 1);
-          lcd1.print(F("Select to Load"));
+          lcd.print(loadStr);
+          lcd.setCursor(0, 1);
+          lcd.print(F("Select to Load"));
           break;
         }
 
       case CONFIRM_RESET_HOME: {
-          lcd1.setCursor(0, 0);
-          lcd1.print(F("Reset Home?"));
-          lcd1.setCursor(0, 1);
-          lcd1.print(F("Sel:Yes  Any:No"));
+          lcd.setCursor(0, 0);
+          lcd.print(F("Reset Home?"));
+          lcd.print(F("Sel:Yes  Any:No"));
           break;
         }
 
       case CONFIRM_SAVE_POS: {
-          lcd1.setCursor(0, 0);
-          lcd1.print(F("Save to Slot "));
-          lcd1.print(inputValue + 1);
-          lcd1.print(F("?"));
-          lcd1.setCursor(0, 1);
-          lcd1.print(F("Sel:Yes  Any:No"));
+          lcd.setCursor(0, 0);
+          lcd.print(F("Save to Slot "));
+          lcd.print(inputValue + 1);
+          lcd.print(F("?"));
+          lcd.setCursor(0, 1);
+          lcd.print(F("Sel:Yes  Any:No"));
           break;
         }
 
       default: {
-          lcd1.setCursor(0, 0);
-          lcd1.print(F("Menu"));
+          lcd.setCursor(0, 0);
+          lcd.print(F("Menu"));
           break;
         }
     }
   }
+
+lastDisplayedPosition = pos;
+  lastDisplayedIndex = menuIndex;
+  lastMenuWasSubMenu = inSubMenu;
+  
 }
 
 

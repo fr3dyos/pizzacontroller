@@ -20,9 +20,9 @@ void updateStatusDisplay() {
     line2 = "Idle";
   }
 
-  lcd2.clear();
-  lcd2.setCursor(0, 0);
-  lcd2.print(line1);
-  lcd2.setCursor(0, 1);
-  lcd2.print(line2);
+//  lcd2.clear();
+//  lcd2.setCursor(0, 0);
+//  lcd2.print(line1);
+//  lcd2.setCursor(0, 1);
+//  lcd2.print(line2);
 }
