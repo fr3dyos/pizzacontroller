@@ -42,7 +42,6 @@
 
 
 // ============================================================================
-
 // PIN DEFINITIONS
 // ============================================================================
 #define STEP_PIN        18
@@ -66,13 +65,13 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 // ============================================================================
 // KEYPAD CALIBRATION CONSTANTS
 // ============================================================================
+
 // Main keypad thresholds (adjust based on your hardware)
 const int KEYPAD_THRESHOLD_1 = 220;
 const int KEYPAD_THRESHOLD_2 = 800;
 const int KEYPAD_THRESHOLD_3 = 1400;
 const int KEYPAD_THRESHOLD_4 = 2300;
 const int KEYPAD_THRESHOLD_5 = 3600;
-
 
 // Direct keypad thresholds
 const int DIRECT_KEYPAD_THRESHOLD_1 = 130;
@@ -82,8 +81,6 @@ const int DIRECT_KEYPAD_THRESHOLD_4 = 1740;
 const int DIRECT_KEYPAD_THRESHOLD_5 = 2370;
 const int DIRECT_KEYPAD_THRESHOLD_6 = 3100;
 const int DIRECT_KEYPAD_THRESHOLD_7 = 3700;
-
-
 
 // Home switch threshold (hall sensor)
 const int HOME_SWITCH_THRESHOLD = 1500;
@@ -210,19 +207,11 @@ const unsigned long debounceDelay = 300;  // Reduced from 200ms for better respo
   int lastSelectedPosIndex = -1;
   bool lastMotorState = false;
 
-
-
 // ============================================================================
 // FASTACCELSTEPPER OBJECTS
 // ============================================================================
 FastAccelStepperEngine engine = FastAccelStepperEngine();
 FastAccelStepper *stepper = nullptr;
-
-
-// ============================================================================
-// HOME SWITCH ISR REMOVED - Now using analog polling in updateHomingState()
-// ============================================================================
-
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -279,7 +268,6 @@ void logSmart(const String &msg) {
   }
 }
 
-
 // ============================================================================
 // SETUP
 // ============================================================================
@@ -288,8 +276,6 @@ void setup() {
   pinMode(HOME_SWITCH_PIN, INPUT_PULLUP);
   pinMode(LED_HOME_PIN, OUTPUT);
   digitalWrite(ENABLE_PIN, HIGH);  // Motor initially disabled
-
-  // Note: Home switch is now analog (hall sensor), no interrupt needed
 
   // Init FastAccelStepper
   engine.init();
@@ -304,7 +290,7 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   Serial.println(F("\n\n========================================"));
-  Serial.println(F("Pizza Controller - LOEM PUC-Rio));
+  Serial.println(F("Pizza Controller - LOEM PUC-Rio"));
   Serial.println(F("========================================\n"));
 
   // Load configuration from NVS (wear-leveled automatically)
@@ -345,7 +331,6 @@ void setup() {
   motorInfo();
   help();
 
-
   pinMode(ESTOP_PIN, INPUT_PULLUP);
   
   int lastSelectedPosIndex = -1;
@@ -372,14 +357,14 @@ lcd.backlight();
 // MAIN LOOP
 // ============================================================================
 void loop() {
-  // E-Stop check - immediate stop if pressed
+// E-Stop check - immediate stop if pressed
   if (readEStop() == LOW) {
     if (stepper) stepper->forceStop();
     isMotorMoving = false;
     isTesting = false;
     homingState = HOMING_IDLE;
     disableMotor();
-    logSmart("E-STOP ACTIVATED - Motor stopped");
+    logSmart("E-STOP ACTIVATED - All movement stopped");
   }
 
   // Handle serial commands (non-blocking)
@@ -899,32 +884,43 @@ void runTestAccel() {
 
 // ============================================================================
 // DIRECT BUTTON HANDLER
+// FIXED: Jog movement uses saved position as reference, not current position
+// - If current position matches saved position, no movement occurs
+// - Movement calculated based on shortest path considering full rotation
 // ============================================================================
 void handleDirectButtons() {
   static int lastDirectKey = 0;
   static unsigned long lastDirectKeyTime = 0;
-  static int lastActionKey = 0;
-  static unsigned long lastActionKeyTime = 0;
 
   unsigned long currentTime = millis();
 
-  // Position selection (GPIO34) - now just selects, no move
+  // Position selection (GPIO34)
   int posKey = readDirectKeypad();
   if (posKey != lastDirectKey && currentTime - lastDirectKeyTime > debounceDelay) {
     lastDirectKey = posKey;
     lastDirectKeyTime = currentTime;
-    if (posKey >= 2 && posKey <= 5) {  // Buttons 2-5 -> slots 0-3 
-      selectedPositionIndex = posKey - 2;
-      logSmart("Position slot " + String(selectedPositionIndex) + " selected (GPIO34)");
-    } else if (posKey == 1) {
-      startFindHome();
-    } else if (posKey == 6) {  // CW jog
-      startMotorMovement(getCurrentPosition() + JOG_STEPS);
-      logSmart("Direct CW jog +" + String(JOG_STEPS) + " (GPIO34)");
-    } else if (posKey == 7) {  // CCW jog
-      startMotorMovement(getCurrentPosition() - JOG_STEPS);
-      logSmart("Direct CCW jog -" + String(JOG_STEPS) + " (GPIO34)");
-    }
+    
+    if (posKey >= 1 && posKey <= 5) {  // Buttons 2-5 -> slots 0-3 
+      selectedPositionIndex = posKey - 1;
+      logSmart("Position slot " + String(posKey));
+    
+    } else if (posKey == 6 || posKey == 7) {  // CW jog - move towards saved position
+
+      bool direction = true if(posKey == 6) else false;  // CW = button 6, CCW = button 7
+      // Get current position and target from selected slot
+      long currentPos = getCurrentPosition();
+      long targetPos = savedPositions[selectedPositionIndex];
+      
+      // Calculate shortest path to target considering full rotation
+      long jogSteps = calculateJogToPosition(currentPos, targetPos, STEPS_PER_REV, true);
+      
+      if (jogSteps == 0) {
+        logSmart("Already at target position");
+      } else {
+        startMotorMovement(currentPos + jogSteps);
+        logSmart("Direct jog to " + String(targetPos) + " by " + String(jogSteps));
+      }
+    } 
   } else if (posKey == 0) {
     lastDirectKey = 0;
   }
@@ -932,10 +928,34 @@ void handleDirectButtons() {
   updateMenuDisplay();
 }
 
+// Calculate jog steps to reach target position
+// Returns 0 if already at target, otherwise returns shortest path
+long calculateJogToPosition(long currentPos, long targetPos, long fullRotation, bool rotationDirection) {
+  // If already at target, no movement needed
+  if (currentPos == targetPos) {
+    return 0;
+  }
+
+  long stepsToJog = targetPos - currentPos;
+
+  if (rotationDirection) {
+    // Clockwise (CW) direction has to return negative
+    if (stepsToJog > 0) {
+      stepsToJog = currentPos - fullRotation - targetPos;  // Wrap around for CW
+    }
+    return stepsToJog;
+  } else {
+    // Counter-clockwise (CCW) direction has to return positive
+    if (stepsToJog < 0) {
+      stepsToJog = fullRotation - targetPos + currentPos;  // Wrap around for CCW
+    }
+    return stepsToJog;  // Negative for CCW direction
+  }
+}
+
 
 // ============================================================================
 // LCD AND KEYPAD
-// FIXED: Consistent array sizing in readDirectKeypad()
 // ============================================================================
 int readKeypad() {
   static int readingsK[3] = {0, 0, 0};
@@ -975,7 +995,7 @@ int readDirectKeypad() {
   static int index = 0;
 
   int currentReading = analogRead(DIRECT_KEYPAD_PIN);
-  Serial.println(currentReading);
+  // Serial.println(currentReading);
   readingsD[index] = currentReading;
   index = (index + 1) % 3;
 
@@ -1038,7 +1058,7 @@ int readHomeSwitch() {
 
 
 // ============================================================================
-// LCD MENU DISPLAY - PRIORITIZING DIRECT BUTTON FUNCTIONS
+// LCD MENU DISPLAY 
 // ============================================================================
 void updateMenuDisplay() {
   long pos = getCurrentPosition();  // Always fresh from stepper
@@ -1054,14 +1074,14 @@ void updateMenuDisplay() {
     return;
   }
 
-// LCD: Main menu - PRIORITIZING DIRECT BUTTON INFO
+// LCD: Main menu 
   lcd.clear();
 
   // PRIORITY 1: Show direct button state prominently
   if (selectedPositionIndex >= 0) {
     // Slot selected via direct button - show prominently
     lcd.setCursor(0, 0);
-    lcd.print(F("Sel"));
+    lcd.print(F("Sel "));
     lcd.print(selectedPositionIndex);
     lcd.print(F("="));
     // Show saved position for this slot
@@ -1420,8 +1440,3 @@ void executeMenuAction() {
       break;
   }
 }
-
-
-// ============================================================================
-// END OF FIXED PROGRAM
-// ============================================================================
