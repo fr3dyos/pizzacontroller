@@ -370,10 +370,9 @@ void setup()
 // ============================================================================
 // MAIN LOOP
 // ============================================================================
-void loop()
+void eStopCheck()
 {
-  // E-Stop check - immediate stop if pressed
-  if (readEStop() == LOW)
+  if (readEStop() == HIGH)
   {
     if (stepper)
       stepper->forceStop();
@@ -382,23 +381,22 @@ void loop()
     homingState = HOMING_IDLE;
     disableMotor();
     logSmart("E-STOP ACTIVATED - All movement stopped");
+    lcd.setCursor(0, 0);
+    lcd.print(F("E-STOP ACTIVE   "));
+    flag = false;
+    lcd.setCursor(0, 0);
+    lcd.print(F("         "));
   }
-  // AAA
-  // logSmart("lastDirectKey: " + String(lastDirectKey) + ", isMotorMoving: " + String(isMotorMoving));
-  // if (lastDirectKey == 6 || lastDirectKey == 7) {
-  //   if (not isMotorMoving) {
-  //     currentPosition = targetPos;
-  //     preferences.putLong("currPos", targetPos);
-  //     logSmart("Direct jog complete. Position: " + String(targetPos));
-  //     updateMenuDisplay();
-  //     lastDirectKey = 8;
+}
+void loop()
+{
 
-  //   }
-  // }
-
+  // E-Stop check - immediate stop if pressed
+  eStopCheck();
   // convert target position into current position
   resetPosition();
-
+  
+  updateMenuDisplay();
   // Handle serial commands (non-blocking)
   handleSerialInput();
 
@@ -778,7 +776,13 @@ void startMotorMovement(long targetPos)
 {
   if (!stepper)
     return;
-
+  if (readEStop() == LOW)
+  {
+    logSmart("E-STOP is active, cannot start movement");
+    lcd.setCursor(0, 0);
+    lcd.print(F("E-STOP ACTIVE   "));
+    return;
+  }
   if (isMotorMoving)
   {
     logSmart("Motor already moving, ignoring command");
@@ -897,14 +901,10 @@ void resetPosition()
   {
     return;
   } 
-  if (currentPosition != targetPos)
+  if (flag && readEStop() != HIGH)
   {
-    return;
-  }
-  if (flag)
-  {
+    delay(100);
     setPositionWithoutMoving(targetPos);
-    updateMenuDisplay();
     flag = false;
   }
   else
@@ -1088,30 +1088,32 @@ void runTestAccel()
 // - Movement calculated based on shortest path considering full rotation
 // ============================================================================
 
-void calculateGoToSavedPosition(long currentPos, long targetPos, long STEPS_PER_REV, String direction)
+long calculateGoToSavedPosition(long currentPos, long targetPos, long STEPS_PER_REV, String direction)
 {
 
   if (currentPos == targetPos)
   {
     logSmart("Already at target position");
-    return;
+    return currentPos;
   }
 
-  if((direction == "CW" && targetPos > currentPos) || (direction == "CCW" && targetPos < currentPos))
+  if( (direction == "CCW" && targetPos < currentPos))
   {
     return targetPos;
   }
+  if (direction == "CW" && targetPos > currentPos)
+  {
+    return targetPos;
+  }
+  if (direction == "CW")
+  {
+    return (targetPos + STEPS_PER_REV); 
+  }
   else
   {
-    if (direction == "CW")
-    {
-      return targetPos + STEPS_PER_REV; 
-    }
-    else
-    {
-      return targetPos - STEPS_PER_REV; 
-    }
+    return (targetPos - STEPS_PER_REV); 
   }
+  
 
 }
 
@@ -1150,37 +1152,15 @@ void handleDirectButtons()
       targetPos = savedPositions[selectedPositionIndex];
 
       // Calculate shortest path to target considering full rotation
-      long moveSteps = calculateJogToPosition(currentPos, targetPos, STEPS_PER_REV, dir);
+      long moveSteps = calculateGoToSavedPosition(currentPos, targetPos, STEPS_PER_REV, dir);
       
-      logSmart("Going to saved position " + String(selectedPositionIndex) + ": " + String(targetPos));
+      logSmart("Going to saved position " + String(selectedPositionIndex) + ": " + String(targetPos)+" : "+String(moveSteps) +" D: "+dir);
       startMotorMovement(moveSteps);
-
-      // long jogSteps = calculateJogToPosition(currentPos, targetPos, STEPS_PER_REV, true);
-
-      // if (jogSteps == 0)
-      // {
-      //   logSmart("Already at target position");
-      // }
-      // else
-      // {
-      //   logSmart("Direct jog to " + String(targetPos) + " by " + String(getCurrentPosition()) + " + jog " + String(jogSteps) + " " + dir);
-      //   if (dir == "CW")
-      //   {
-      //     commandTemp = "JOG F " + String(jogSteps);
-      //     Serial.println("Generated command: " + commandTemp);
-      //     processCommand(commandTemp);
-      //   }
-      //   else
-      //   {
-      //     commandTemp = "JOG B " + String(abs(jogSteps));
-      //     Serial.println("Generated command: " + commandTemp);
-      //     processCommand(commandTemp);
-      //   }
 
         flag = true; // Set flag to update position after jog completes
       }
     }
-  }
+  
   updateMenuDisplay();
 }
 
@@ -1400,6 +1380,7 @@ void updateMenuDisplay()
   // PRIORITY 2: Show motor action when moving (from direct buttons)
   else if (isMotorMoving)
   {
+    eStopCheck();
     lcd.setCursor(0, 0);
     lcd.print(F("Pos:"));
     String posStr = String(pos);
