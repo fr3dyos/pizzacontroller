@@ -393,7 +393,7 @@ void setup()
   lcd.setCursor(0, 0);
   lcd.print(F("  LOEM PUC-Rio  "));
   lcd.setCursor(0, 1);
-  lcd.print(F("Pizza  Controller"));
+  lcd.print(F("Pizza  Control"));
 
   delay(2000);
   updateMenuDisplay();
