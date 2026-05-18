@@ -50,7 +50,6 @@
 #define LCD_ROWS 2
 #define LCD_SDA 25
 #define LCD_SCL 26
-LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
 #define KEYPAD_PIN 35
 #define DIRECT_KEYPAD_PIN 34
@@ -59,9 +58,13 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 #define LED_HOME_PIN 32 // Optional: onboard LED for home status indication
 
 // ============================================================================
+// DISPLAY OBJECTS
+// ============================================================================
+LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
+
+// ============================================================================
 // KEYPAD CALIBRATION CONSTANTS
 // ============================================================================
-
 // Main keypad thresholds (adjust based on your hardware)
 const int KEYPAD_THRESHOLD_1 = 220;
 const int KEYPAD_THRESHOLD_2 = 800;
@@ -137,8 +140,6 @@ struct SerialLogBuffer
   }
 };
 
-SerialLogBuffer logBuffer;
-
 // ============================================================================
 // MOTOR CONFIGURATION
 // ============================================================================
@@ -149,6 +150,7 @@ float HOMING_SPEED = 2000.0;
 int JOG_STEPS = 50;
 int HOME_DIRECTION = -1; // -1 = move negative to find home, +1 = move positive
 int lastDirectKey = 0;   // For direct button state tracking
+
 const long MAX_JOG_STEPS = 50000;
 const long MAX_POSITION = 1000000;
 const float MAX_SPEED_LIMIT = 50000.0;
@@ -169,94 +171,127 @@ HomingState homingState = HOMING_IDLE;
 unsigned long homingStartTime = 0;
 
 // ============================================================================
-// GLOBAL VARIABLES
+// POSITION AND STORAGE STATE
 // ============================================================================
 long currentPosition = 0;
 long homePosition = 0;
 long savedPositions[5] = {0};
 Preferences preferences;
 
+// ============================================================================
+// TEST STATE
+// ============================================================================
 bool isTesting = false;
 long testSteps = 0;
 bool testDirection = true;
 unsigned long lastTestTime = 0; // For non-blocking test timing
 
-// Menu state
+// ============================================================================
+// MENU STATE
+// ============================================================================
 int menuIndex = 0;
 const int menuSize = 8;
 String menuItems[8] = {
   "Go to Saved Pos", "Change Speed", "Change Accel", "Home",
   "Reset Home", "Save Position", "Go to Pos", "Jog"
 };
+
 bool inSubMenu = false;
 SubMenu subMenuType = NONE;
 long inputValue = 0;
 bool inputDirection = true;
 int lastKey = 0;
 unsigned long lastKeyTime = 0;
-long targetPos = 0;                      // For direct button target position
 const unsigned long debounceDelay = 300; // Reduced from 200ms for better responsiveness
-bool flag = false;
-// LCD refresh tracking (optimization)
-bool lastMenuWasSubMenu = false;
-int lastDisplayedIndex = -1;
-long lastDisplayedPosition = -999999;
 
-// Direct buttons selection state
+// ============================================================================
+// DIRECT BUTTON STATE
+// ============================================================================
+long targetPos = 0; // For direct button target position
+bool flag = false;
 int selectedPositionIndex = -1; // -1=none, 0-4=selected slot
 int lastSelectedPosIndex = -1;
 bool lastMotorState = false;
 
 // ============================================================================
-// FASTACCELSTEPPER OBJECTS
+// LCD REFRESH TRACKING
 // ============================================================================
+bool lastMenuWasSubMenu = false;
+int lastDisplayedIndex = -1;
+long lastDisplayedPosition = -999999;
+
+// ============================================================================
+// GLOBAL OBJECTS
+// ============================================================================
+SerialLogBuffer logBuffer;
 FastAccelStepperEngine engine = FastAccelStepperEngine();
 FastAccelStepper *stepper = nullptr;
 
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
+void setup();
+void loop();
+
 void enterSubMenu();
 void executeMenuAction();
 void updateMenuDisplay();
+void handleMenu();
+void handleDirectButtons();
+void handleSerialInput();
+void processCommand(String command);
+
 void startMotorMovement(long targetPos);
 void updateMotorMovement();
 void disableMotor();
 void enableMotor();
 void scheduleMotorDisable();
+
 void updateHomingState();
 void startFindHome();
-void handleMenu();
-void handleDirectButtons();
-void handleSerialInput();
-void processCommand(String command);
+void findHomeDirection(int direction);
+
 void saveCurrentPosition();
 void savePositionToSlot(int num);
 void loadPositionFromSlot(int num);
 void moveToPosition(long targetPosition);
 void home();
 void resetHome();
+void resetPosition();
 long getCurrentPosition();
+
 void setStepsPerRev(int value);
 void setMaxSpeed(float value);
 void setAcceleration(float value);
 void setMotorHoldTime(unsigned long value);
 void setHomingSpeed(float value);
 void setHomeDirection(int value);
-void startTestAccel(long steps);
 void setPositionWithoutMoving(long newPos);
+
+void startTestAccel(long steps);
 void stopTestAccel();
 void runTestAccel();
+
 int readKeypad();
 int readDirectKeypad();
 int readHomeSwitch();
+int readEStop();
+
+void eStopCheck();
+void logSmart(const String &msg);
+void motorInfo();
+void help();
+
+long calculateGoToSavedPosition(long currentPos, long targetPos, long STEPS_PER_REV, String direction);
+long calculateJogToPosition(long currentPos, long targetPos, long fullRotation, bool rotationDirection);
+
+// ============================================================================
+// BASIC INPUT HELPERS
+// ============================================================================
 int readEStop()
 {
   return digitalRead(ESTOP_PIN);
 }
-void logSmart(const String &msg);
-void motorInfo();
-void help();
 
 // ============================================================================
 // SMART LOGGING (Buffer when motor moving, immediate otherwise)
@@ -281,9 +316,8 @@ void setup()
   pinMode(ENABLE_PIN, OUTPUT);
   pinMode(HOME_SWITCH_PIN, INPUT_PULLUP);
   pinMode(LED_HOME_PIN, OUTPUT);
-  digitalWrite(ENABLE_PIN, HIGH); // Motor initially disabled
+  digitalWrite(ENABLE_PIN, HIGH); // Motor initially disabled... // Init FastAccelStepper
 
-  // Init FastAccelStepper
   engine.init();
   stepper = engine.stepperConnectToPin(STEP_PIN);
   if (stepper)
@@ -368,40 +402,21 @@ void setup()
 
   // Calibration on the start of the equippment
   // findHomeDirection(HOME_DIRECTION);
-
 }
 
 // ============================================================================
 // MAIN LOOP
 // ============================================================================
-void eStopCheck()
-{
-  if (readEStop() == HIGH)
-  {
-    if (stepper)
-      stepper->forceStop();
-    isMotorMoving = false;
-    isTesting = false;
-    homingState = HOMING_IDLE;
-    disableMotor();
-    logSmart("E-STOP ACTIVATED - All movement stopped");
-    lcd.setCursor(0, 0);
-    lcd.print(F("E-STOP ACTIVE   "));
-    delay(100);
-    flag = false;
-    lcd.setCursor(0, 0);
-    lcd.print(F("                "));
-  }
-}
 void loop()
 {
-
   // E-Stop check - immediate stop if pressed
   eStopCheck();
+
   // convert target position into current position
   resetPosition();
-  
+
   updateMenuDisplay();
+
   // Handle serial commands (non-blocking)
   handleSerialInput();
 
@@ -442,7 +457,30 @@ void loop()
 }
 
 // ============================================================================
-// MOTOR ENABLE/DISABLE
+// SAFETY
+// ============================================================================
+void eStopCheck()
+{
+  if (readEStop() == HIGH)
+  {
+    if (stepper)
+      stepper->forceStop();
+    isMotorMoving = false;
+    isTesting = false;
+    homingState = HOMING_IDLE;
+    disableMotor();
+    logSmart("E-STOP ACTIVATED - All movement stopped");
+    lcd.setCursor(0, 0);
+    lcd.print(F("E-STOP ACTIVE   "));
+    delay(100);
+    flag = false;
+    lcd.setCursor(0, 0);
+    lcd.print(F("                "));
+  }
+}
+
+// ============================================================================
+// MOTOR ENABLE / DISABLE
 // FIXED: Proper hold-time state management
 // ============================================================================
 void enableMotor()
@@ -451,6 +489,7 @@ void enableMotor()
   {
     stepper->enableOutputs();
   }
+
   // Clear any pending disable timer when actively enabling
   motorShouldDisable = false;
   motorDisableTime = 0;
@@ -472,6 +511,7 @@ void scheduleMotorDisable()
 }
 
 // ============================================================================
+// HOMING
 // INTERRUPT-DRIVEN HOMING WITH ISR-SAFE DEBOUNCING
 // FIXED: Debouncing moved outside ISR, uses millis() in main loop only
 // ============================================================================
@@ -480,10 +520,12 @@ void findHomeDirection(int direction)
   setHomeDirection(direction);
   startFindHome();
 }
+
 void startFindHome()
 {
   if (!stepper)
     return;
+
   Serial.println(F("Starting home search..."));
   Serial.print(F("Moving in direction: "));
   Serial.println(HOME_DIRECTION);
@@ -547,6 +589,7 @@ void updateHomingState()
 }
 
 // ============================================================================
+// SERIAL INPUT
 // NON-BLOCKING SERIAL INPUT HANDLER
 // FIXED: Character-by-character parsing instead of blocking readStringUntil()
 // ============================================================================
@@ -718,6 +761,9 @@ void processCommand(String command)
   }
 }
 
+// ============================================================================
+// REPORTING
+// ============================================================================
 void motorInfo()
 {
   Serial.println("=========================================================");
@@ -853,7 +899,6 @@ void loadPositionFromSlot(int num)
   {
     long targetPos = savedPositions[num];
     logSmart("Loading position from slot " + String(num) + ": " + String(targetPos));
-
     if (currentPosition != targetPos)
     {
       startMotorMovement(targetPos);
@@ -905,7 +950,7 @@ void resetPosition()
   if (isMotorMoving)
   {
     return;
-  } 
+  }
   if (flag && readEStop() == LOW)
   {
     delay(100);
@@ -916,7 +961,6 @@ void resetPosition()
   {
     return;
   }
-  
 }
 
 // FIXED: Always refresh from stepper for accurate reading
@@ -1092,17 +1136,15 @@ void runTestAccel()
 // - If current position matches saved position, no movement occurs
 // - Movement calculated based on shortest path considering full rotation
 // ============================================================================
-
 long calculateGoToSavedPosition(long currentPos, long targetPos, long STEPS_PER_REV, String direction)
 {
-
   if (currentPos == targetPos)
   {
     logSmart("Already at target position");
     return currentPos;
   }
 
-  if( (direction == "CCW" && targetPos < currentPos))
+  if ((direction == "CCW" && targetPos < currentPos))
   {
     return targetPos;
   }
@@ -1112,16 +1154,13 @@ long calculateGoToSavedPosition(long currentPos, long targetPos, long STEPS_PER_
   }
   if (direction == "CW")
   {
-    return (targetPos + STEPS_PER_REV); 
+    return (targetPos + STEPS_PER_REV);
   }
   else
   {
-    return (targetPos - STEPS_PER_REV); 
+    return (targetPos - STEPS_PER_REV);
   }
-  
-
 }
-
 
 void handleDirectButtons()
 {
@@ -1144,7 +1183,6 @@ void handleDirectButtons()
     }
     else if (posKey == 6 || posKey == 7)
     { // CW jog - move towards saved position
-
       bool direction = true;
       String dir = "CW";
       if (posKey == 6)
@@ -1158,14 +1196,14 @@ void handleDirectButtons()
 
       // Calculate shortest path to target considering full rotation
       long moveSteps = calculateGoToSavedPosition(currentPos, targetPos, STEPS_PER_REV, dir);
-      
-      logSmart("Going to saved position " + String(selectedPositionIndex) + ": " + String(targetPos)+" : "+String(moveSteps) +" D: "+dir);
+
+      logSmart("Going to saved position " + String(selectedPositionIndex) + ": " + String(targetPos) + " : " + String(moveSteps) + " D: " + dir);
       startMotorMovement(moveSteps);
 
-        flag = true; // Set flag to update position after jog completes
-      }
+      flag = true; // Set flag to update position after jog completes
     }
-  
+  }
+
   updateMenuDisplay();
 }
 
@@ -1205,7 +1243,7 @@ long calculateJogToPosition(long currentPos, long targetPos, long fullRotation, 
 }
 
 // ============================================================================
-// LCD AND KEYPAD
+// LCD AND KEYPAD INPUT
 // ============================================================================
 int readKeypad()
 {
@@ -1356,6 +1394,7 @@ void updateMenuDisplay()
     lcd.print(F("Sel "));
     lcd.print(selectedPositionIndex);
     lcd.print(F("="));
+
     // Show saved position for this slot
     String slotPosStr = String(savedPositions[selectedPositionIndex]);
     if (slotPosStr.length() > 10)
@@ -1376,158 +1415,188 @@ void updateMenuDisplay()
     {
       // Show current position
       String curPosStr = String(pos);
-      if (curPosStr.length() > 14)
-        curPosStr = curPosStr.substring(0, 14);
-      lcd.print(F("Cur:"));
+      if (curPosStr.length() > 16)
+        curPosStr = curPosStr.substring(0, 16);
       lcd.print(curPosStr);
     }
+
+    lastDisplayedPosition = pos;
+    lastMenuWasSubMenu = inSubMenu;
+    lastDisplayedIndex = menuIndex;
+    return;
   }
-  // PRIORITY 2: Show motor action when moving (from direct buttons)
-  else if (isMotorMoving)
+
+  if (!inSubMenu)
   {
-    eStopCheck();
+    // Main menu: show menu item and current position
     lcd.setCursor(0, 0);
-    lcd.print(F("Pos:"));
-    String posStr = String(pos);
-    if (posStr.length() > 10)
-      posStr = posStr.substring(0, 10);
-    lcd.print(posStr);
+    lcd.print(F("> "));
+    String menuText = menuItems[menuIndex];
+    if (menuText.length() > 14)
+      menuText = menuText.substring(0, 14);
+    lcd.print(menuText);
 
     lcd.setCursor(0, 1);
-    lcd.print(F("Moving..."));
-  }
-  // PRIORITY 3: Show homing state
-  else if (homingState != HOMING_IDLE)
-  {
-    lcd.setCursor(0, 0);
-    lcd.print(F("Pos:"));
-    String posStr = String(pos);
-    if (posStr.length() > 10)
-      posStr = posStr.substring(0, 10);
+    String posStr = "Pos: " + String(pos);
+    if (posStr.length() > 16)
+      posStr = posStr.substring(0, 16);
     lcd.print(posStr);
-
-    lcd.setCursor(0, 1);
-    lcd.print(F("Finding Home..."));
   }
-  // PRIORITY 4: Normal menu mode (when no direct button action)
-  else if (!inSubMenu)
-  {
-    lcd.setCursor(0, 0);
-    lcd.print(F("P:"));
-    String posStr = String(pos);
-    if (posStr.length() > 12)
-      posStr = posStr.substring(0, 12);
-    lcd.print(posStr);
-
-    lcd.setCursor(0, 1);
-    String menuStr = menuItems[menuIndex];
-    if (menuStr.length() > 16)
-      menuStr = menuStr.substring(0, 16);
-    lcd.print(menuStr);
-  }
-  // PRIORITY 5: Submenu mode
   else
   {
-    lastMenuWasSubMenu = true;
-
     switch (subMenuType)
     {
-      case JOG:
-        lcd.setCursor(0, 0);
-        lcd.print(F("Jog Steps:"));
-        lcd.setCursor(0, 1);
-        lcd.print(inputValue);
-        break;
+    case GOTO_SAVED:
+      lcd.setCursor(0, 0);
+      lcd.print(F("Goto saved:"));
+      lcd.setCursor(0, 1);
+      lcd.print(inputValue);
+      break;
 
-      case SPEED:
-        lcd.setCursor(0, 0);
-        lcd.print(F("Max Speed:"));
-        lcd.setCursor(0, 1);
-        lcd.print(inputValue);
-        break;
+    case SPEED:
+      lcd.setCursor(0, 0);
+      lcd.print(F("Speed:    "));
+      lcd.setCursor(0, 1);
+      lcd.print(inputValue);
+      break;
 
-      case ACCEL:
-        lcd.setCursor(0, 0);
-        lcd.print(F("Accel:"));
-        lcd.setCursor(0, 1);
-        lcd.print(inputValue);
-        break;
+    case ACCEL:
+      lcd.setCursor(0, 0);
+      lcd.print(F("Accel:    "));
+      lcd.setCursor(0, 1);
+      lcd.print(inputValue);
+      break;
 
-      case SAVE_POS:
-        {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Slot "));
-          lcd.print(inputValue + 1);
-          lcd.print(F(": "));
-          String savedStr = String(savedPositions[inputValue]);
-          if (savedStr.length() > 5)
-            savedStr = savedStr.substring(0, 5);
-          lcd.print(savedStr);
-          lcd.setCursor(0, 1);
-          lcd.print(F("Select to Save"));
-          break;
-        }
+    case RESET_HOME:
+    case CONFIRM_RESET_HOME:
+      lcd.setCursor(0, 0);
+      lcd.print(F("Reset home?"));
+      lcd.setCursor(0, 1);
+      lcd.print(inputDirection ? F("No") : F("Yes"));
+      break;
 
-      case GOTO:
-        {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Go to Pos:"));
-          lcd.setCursor(0, 1);
-          lcd.print(inputValue);
-          break;
-        }
+    case SAVE_POS:
+    case CONFIRM_SAVE_POS:
+      lcd.setCursor(0, 0);
+      lcd.print(F("Save to slot:"));
+      lcd.setCursor(0, 1);
+      lcd.print(inputValue);
+      break;
 
-      case GOTO_SAVED:
-        {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Slot "));
-          lcd.print(inputValue + 1);
-          lcd.print(F(": "));
-          String loadStr = String(savedPositions[inputValue]);
-          if (loadStr.length() > 5)
-            loadStr = loadStr.substring(0, 5);
-          lcd.print(loadStr);
-          lcd.setCursor(0, 1);
-          lcd.print(F("Select to Load"));
-          break;
-        }
+    case GOTO:
+      lcd.setCursor(0, 0);
+      lcd.print(F("Go to pos:"));
+      lcd.setCursor(0, 1);
+      lcd.print(inputValue);
+      break;
 
-      case CONFIRM_RESET_HOME:
-        {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Reset Home?"));
-          lcd.print(F("Sel:Yes  Any:No"));
-          break;
-        }
+    case JOG:
+      lcd.setCursor(0, 0);
+      lcd.print(F("Jog steps:"));
+      lcd.setCursor(0, 1);
+      lcd.print(inputValue);
+      break;
 
-      case CONFIRM_SAVE_POS:
-        {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Save to Slot "));
-          lcd.print(inputValue + 1);
-          lcd.print(F("?"));
-          lcd.setCursor(0, 1);
-          lcd.print(F("Sel:Yes  Any:No"));
-          break;
-        }
-
-      default:
-        {
-          lcd.setCursor(0, 0);
-          lcd.print(F("Menu"));
-          break;
-        }
+    default:
+      break;
     }
   }
 
   lastDisplayedPosition = pos;
-  lastDisplayedIndex = menuIndex;
   lastMenuWasSubMenu = inSubMenu;
+  lastDisplayedIndex = menuIndex;
 }
 
 // ============================================================================
-// MENU HANDLER
+// MENU HANDLING
 // ============================================================================
+void enterSubMenu()
+{
+  inSubMenu = true;
+
+  switch (menuIndex)
+  {
+  case 0:
+    subMenuType = GOTO_SAVED;
+    inputValue = 0;
+    break;
+  case 1:
+    subMenuType = SPEED;
+    inputValue = (long)MAX_SPEED;
+    break;
+  case 2:
+    subMenuType = ACCEL;
+    inputValue = (long)ACCELERATION;
+    break;
+  case 3:
+    home();
+    inSubMenu = false;
+    subMenuType = NONE;
+    break;
+  case 4:
+    subMenuType = CONFIRM_RESET_HOME;
+    inputDirection = true;
+    break;
+  case 5:
+    subMenuType = SAVE_POS;
+    inputValue = 0;
+    break;
+  case 6:
+    subMenuType = GOTO;
+    inputValue = currentPosition;
+    break;
+  case 7:
+    subMenuType = JOG;
+    inputValue = JOG_STEPS;
+    break;
+  }
+
+  updateMenuDisplay();
+}
+
+void executeMenuAction()
+{
+  switch (subMenuType)
+  {
+  case GOTO_SAVED:
+    loadPositionFromSlot((int)inputValue);
+    break;
+
+  case SPEED:
+    setMaxSpeed((float)inputValue);
+    break;
+
+  case ACCEL:
+    setAcceleration((float)inputValue);
+    break;
+
+  case CONFIRM_RESET_HOME:
+    if (!inputDirection)
+      resetHome();
+    break;
+
+  case SAVE_POS:
+  case CONFIRM_SAVE_POS:
+    savePositionToSlot((int)inputValue);
+    break;
+
+  case GOTO:
+    moveToPosition(inputValue);
+    break;
+
+  case JOG:
+    JOG_STEPS = inputValue;
+    break;
+
+  default:
+    break;
+  }
+
+  inSubMenu = false;
+  subMenuType = NONE;
+  updateMenuDisplay();
+}
+
 void handleMenu()
 {
   int key = readKeypad();
@@ -1540,233 +1609,68 @@ void handleMenu()
 
     if (!inSubMenu)
     {
-      switch (key)
+      if (key == 1)
       {
-        case 2:
-          menuIndex = (menuIndex - 1 + menuSize) % menuSize;
-          updateMenuDisplay();
-          break;
-
-        case 3:
-          menuIndex = (menuIndex + 1) % menuSize;
-          updateMenuDisplay();
-          break;
-
-        case 5:
-          if (menuIndex == 3)
-          {
-            home();
-            updateMenuDisplay();
-          }
-          else if (menuIndex == 4)
-          {
-            inSubMenu = true;
-            subMenuType = CONFIRM_RESET_HOME;
-            updateMenuDisplay();
-          }
-          else
-          {
-            enterSubMenu();
-          }
-          break;
+        menuIndex = (menuIndex - 1 + menuSize) % menuSize;
+      }
+      else if (key == 2)
+      {
+        menuIndex = (menuIndex + 1) % menuSize;
+      }
+      else if (key == 5)
+      {
+        enterSubMenu();
       }
     }
     else
     {
-      if (subMenuType == JOG)
+      if (key == 4)
       {
-        switch (key)
-        {
-          case 1:
-            startMotorMovement(getCurrentPosition() + inputValue);
-            inputDirection = true;
-            break;
-
-          case 4:
-            startMotorMovement(getCurrentPosition() - inputValue);
-            inputDirection = false;
-            break;
-
-          case 2:
-            inputValue = min(inputValue + 20, (long)MAX_JOG_STEPS);
-            updateMenuDisplay();
-            break;
-
-          case 3:
-            inputValue = (inputValue - 20 < 0) ? 0 : inputValue - 20;
-            updateMenuDisplay();
-            break;
-
-          case 5:
-            inSubMenu = false;
-            subMenuType = NONE;
-            updateMenuDisplay();
-            break;
-        }
+        inSubMenu = false;
+        subMenuType = NONE;
       }
-      else if (subMenuType == GOTO_SAVED || subMenuType == SAVE_POS)
+      else if (key == 5)
       {
-        switch (key)
-        {
-          case 1:
-            inputValue = (inputValue + 1 > 4) ? 4 : inputValue + 1;
-            updateMenuDisplay();
-            break;
-
-          case 4:
-            inputValue = (inputValue - 1 < 0) ? 0 : inputValue - 1;
-            updateMenuDisplay();
-            break;
-
-          case 5:
-            executeMenuAction();
-            break;
-        }
-      }
-      else if (subMenuType == CONFIRM_RESET_HOME || subMenuType == CONFIRM_SAVE_POS)
-      {
-        switch (key)
-        {
-          case 5:
-            if (subMenuType == CONFIRM_RESET_HOME)
-            {
-              resetHome();
-              inSubMenu = false;
-              subMenuType = NONE;
-              updateMenuDisplay();
-            }
-            else if (subMenuType == CONFIRM_SAVE_POS)
-            {
-              savePositionToSlot((int)inputValue);
-              inSubMenu = true;
-              subMenuType = SAVE_POS;
-              updateMenuDisplay();
-            }
-            break;
-
-          default:
-            inSubMenu = false;
-            subMenuType = NONE;
-            updateMenuDisplay();
-            break;
-        }
+        executeMenuAction();
       }
       else
       {
-        switch (key)
+        switch (subMenuType)
         {
-          case 1:
-            inputValue += 10;
-            updateMenuDisplay();
-            break;
+        case GOTO_SAVED:
+        case SAVE_POS:
+        case CONFIRM_SAVE_POS:
+          if (key == 1 && inputValue > 0)
+            inputValue--;
+          if (key == 2 && inputValue < 4)
+            inputValue++;
+          break;
 
-          case 4:
+        case SPEED:
+        case ACCEL:
+        case GOTO:
+        case JOG:
+          if (key == 1)
             inputValue -= 10;
-            updateMenuDisplay();
-            break;
-
-          case 2:
+          if (key == 2)
+            inputValue += 10;
+          if (key == 3)
+            inputValue -= 100;
+          if (key == 4)
             inputValue += 100;
-            updateMenuDisplay();
-            break;
+          break;
 
-          case 3:
-            inputValue = (inputValue - 100 < 0) ? 0 : inputValue - 100;
-            updateMenuDisplay();
-            break;
+        case CONFIRM_RESET_HOME:
+          if (key == 1 || key == 2)
+            inputDirection = !inputDirection;
+          break;
 
-          case 5:
-            executeMenuAction();
-            break;
+        default:
+          break;
         }
       }
     }
-  }
-  else if (key == 0)
-  {
-    lastKey = 0;
-  }
-}
 
-void enterSubMenu()
-{
-  inSubMenu = true;
-
-  SubMenu menuMap[] = {
-    GOTO_SAVED, SPEED, ACCEL, NONE, // NONE for "Home" (index 3)
-    RESET_HOME, SAVE_POS, GOTO, JOG
-  };
-
-  if (menuIndex < menuSize)
-  {
-    subMenuType = menuMap[menuIndex];
-  }
-
-  if (subMenuType == SPEED)
-  {
-    inputValue = (long)MAX_SPEED;
-  }
-  else if (subMenuType == ACCEL)
-  {
-    inputValue = (long)ACCELERATION;
-  }
-  else if (subMenuType == JOG)
-  {
-    inputValue = JOG_STEPS;
-  }
-  else
-  {
-    inputValue = 0;
-  }
-
-  updateMenuDisplay();
-}
-
-void executeMenuAction()
-{
-  switch (subMenuType)
-  {
-    case JOG:
-      break;
-
-    case SPEED:
-      setMaxSpeed((float)inputValue);
-      inSubMenu = false;
-      subMenuType = NONE;
-      updateMenuDisplay();
-      break;
-
-    case ACCEL:
-      setAcceleration((float)inputValue);
-      inSubMenu = false;
-      subMenuType = NONE;
-      updateMenuDisplay();
-      break;
-
-    case SAVE_POS:
-      inSubMenu = true;
-      subMenuType = CONFIRM_SAVE_POS;
-      updateMenuDisplay();
-      break;
-
-    case GOTO:
-      moveToPosition(inputValue);
-      inSubMenu = false;
-      subMenuType = NONE;
-      updateMenuDisplay();
-      break;
-
-    case GOTO_SAVED:
-      loadPositionFromSlot((int)inputValue);
-      inSubMenu = false;
-      subMenuType = NONE;
-      updateMenuDisplay();
-      break;
-
-    default:
-      inSubMenu = false;
-      subMenuType = NONE;
-      updateMenuDisplay();
-      break;
+    updateMenuDisplay();
   }
 }
