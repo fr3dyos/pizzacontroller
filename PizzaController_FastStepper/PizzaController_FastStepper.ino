@@ -365,6 +365,10 @@ void setup()
   updateMenuDisplay();
 
   Serial.println(F("System ready!"));
+
+  // Calibration on the start of the equippment
+  // findHomeDirection(HOME_DIRECTION);
+
 }
 
 // ============================================================================
@@ -383,9 +387,10 @@ void eStopCheck()
     logSmart("E-STOP ACTIVATED - All movement stopped");
     lcd.setCursor(0, 0);
     lcd.print(F("E-STOP ACTIVE   "));
+    delay(100);
     flag = false;
     lcd.setCursor(0, 0);
-    lcd.print(F("         "));
+    lcd.print(F("                "));
   }
 }
 void loop()
@@ -470,6 +475,11 @@ void scheduleMotorDisable()
 // INTERRUPT-DRIVEN HOMING WITH ISR-SAFE DEBOUNCING
 // FIXED: Debouncing moved outside ISR, uses millis() in main loop only
 // ============================================================================
+void findHomeDirection(int direction)
+{
+  setHomeDirection(direction);
+  startFindHome();
+}
 void startFindHome()
 {
   if (!stepper)
@@ -776,13 +786,8 @@ void startMotorMovement(long targetPos)
 {
   if (!stepper)
     return;
-  if (readEStop() == LOW)
-  {
-    logSmart("E-STOP is active, cannot start movement");
-    lcd.setCursor(0, 0);
-    lcd.print(F("E-STOP ACTIVE   "));
+  if (readEStop())
     return;
-  }
   if (isMotorMoving)
   {
     logSmart("Motor already moving, ignoring command");
@@ -901,7 +906,7 @@ void resetPosition()
   {
     return;
   } 
-  if (flag && readEStop() != HIGH)
+  if (flag && readEStop() == LOW)
   {
     delay(100);
     setPositionWithoutMoving(targetPos);
