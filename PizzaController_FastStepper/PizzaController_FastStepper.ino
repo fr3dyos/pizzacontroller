@@ -401,7 +401,8 @@ void setup()
   Serial.println(F("System ready!"));
 
   // Calibration on the start of the equippment
-  // findHomeDirection(HOME_DIRECTION);
+  findHomeDirection(1);
+  delay(1000);
 }
 
 // ============================================================================
@@ -517,6 +518,9 @@ void scheduleMotorDisable()
 // ============================================================================
 void findHomeDirection(int direction)
 {
+  int startPoint = int(STEPS_PER_REV/10);
+  startMotorMovement(startPoint*-1*direction);
+  delay(1000); 
   setHomeDirection(direction);
   startFindHome();
 }
@@ -1140,8 +1144,14 @@ long calculateGoToSavedPosition(long currentPos, long targetPos, long STEPS_PER_
 {
   if (currentPos == targetPos)
   {
-    logSmart("Already at target position");
-    return currentPos;
+    if (direction == "CW")
+    {
+      return currentPos + STEPS_PER_REV;
+    }
+    else
+    {
+      return currentPos - STEPS_PER_REV;
+    }
   }
 
   if ((direction == "CCW" && targetPos < currentPos))
@@ -1417,6 +1427,7 @@ void updateMenuDisplay()
       String curPosStr = String(pos);
       if (curPosStr.length() > 16)
         curPosStr = curPosStr.substring(0, 16);
+      lcd.print(F("Cur: "));
       lcd.print(curPosStr);
     }
 
