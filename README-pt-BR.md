@@ -8,10 +8,11 @@ Este projeto fornece um sketch completo do Arduino para controlar um motor de pa
 - Motor de Passo NEMA23
 - Driver DM556
 - Fonte de Alimentação 24Vdc - 5A
-- Keypad 5 Botões
-- Display LCD 16x2
-- Sensor de Home de efeito Hall A3144, alimentado com 3.3V
-- Botoeira personalizada para função de posição direta
+- Keypad analógico de 5 botões (navegação)
+- Painel analógico de 7 botões diretos (slots 0–4 + jog CW/CCW)
+- Display LCD I2C 16x2 (endereço 0x27)
+- Sensor de Home de efeito Hall A3144, alimentado com 3,3V
+- Opcional: LED no GPIO 32 para indicação de status do home
 
 ## Conexões de Fiação
 
@@ -22,13 +23,13 @@ Conecte o ESP32 ao driver DM556 da seguinte forma:
 - ESP32 GPIO 21 → DM556 ENABLE (ativo baixo)
 - ESP32 GPIO 27 → Sensor de Limite de Home
 
-### Botões de Posição Direta (Seleção de Slot)
+### Botões de Posição Direta (Seleção de Slot + Jog CW/CCW)
 
-- ESP32 GPIO 34 → Botões diretos de 5 posições (analógico) - seleciona slots de posição 0-4
+- ESP32 GPIO 34 → Botões diretos de 7 posições (analógico) - seleciona slots 0-4 e dispara jog CW/CCW (teclas 6/7) em direção ao slot selecionado
 
-### Botões de Ação (CW/CCW)
+### LED de Status do Home (Opcional)
 
-- ESP32 GPIO 32 → Botões de ação para movimento CW/CCW para posição selecionada
+- ESP32 GPIO 32 → Saída para LED que indica o estado do sensor de home (acende quando o sensor Hall é acionado)
 
 ### Botão de Parada de Emergência
 
@@ -36,17 +37,15 @@ Conecte o ESP32 ao driver DM556 da seguinte forma:
 
 ### Keypad de Navegação
 
-- ESP32 GPIO 35 → Botoeira de Posição Navegação (leitura analógica)
+- ESP32 GPIO 35 → Botoeira de Navegação (leitura analógica)
 
-### Displays LCD via I2C
+### Display LCD via I2C
 
-**LCD1 (menu principal, 0x27):**
-- ESP32 GPIO 25 → SDA1
-- ESP32 GPIO 26 → SCL1 (I2C1/Wire)
+**LCD (menu principal, 0x27):**
+- ESP32 GPIO 25 → SDA
+- ESP32 GPIO 26 → SCL (I2C1/Wire)
 
-**LCD2 (status, 0x3F):**
-- ESP32 GPIO 22 → SDA2
-- ESP32 GPIO 23 → SCL2 (I2C2/Wire2)
+Apenas um LCD é usado pelo firmware (endereço 0x27 no barramento Wire padrão). Os GPIOs 22/23 não são acionados por este sketch.
 
 
 ## Mapa de Conexões
@@ -59,19 +58,16 @@ Conecte o ESP32 ao driver DM556 da seguinte forma:
 | ESP32                | GPIO 25 | LCD I2C SDA                                     |
 | ESP32                | GPIO 26 | LCD I2C SCL                                     |
 | ESP32                | GPIO 27 | Sensor Hall A3144 Home (3,3 V)                  |
-| ESP32                | GPIO 32 | Botões de Ação (analógico)                      |
+| ESP32                | GPIO 32 | LED de status do Home (saída digital)           |
 | ESP32                | GPIO 33 | Botão E-Stop                                    |
-| ESP32                | GPIO 34 | Botões de Posição Direta (analógico 5 posições) |
+| ESP32                | GPIO 34 | Botões de Posição Direta (analógico 7 posições) |
 | ESP32                | GPIO 35 | Keypad de Navegação (analógico)                 |
 | ESP32                | 5V      | Saída +5 V do LM2596 (out+)                     |
-| LCD I2C 2º           | SDA     | ESP32 GPIO 25 (endereço 0x3F)                   |
-| LCD I2C 2º           | SCL     | ESP32 GPIO 26 (endereço 0x3F)                   |
-| Botões de Ação       | Sinal   | ESP32 GPIO 32                                   |
-| Botões de Ação       | VCC     | 3,3 V                                           |
-| Botões de Ação       | GND     | GND                                             |
 | Botão E-Stop         | Sinal   | ESP32 GPIO 33                                   |
 | Botão E-Stop         | VCC     | 3,3 V                                           |
 | Botão E-Stop         | GND     | GND                                             |
+| LED Home             | Ânodo   | ESP32 GPIO 32 (via resistor)                    |
+| LED Home             | Cátodo  | GND                                             |
 | ESP32                | GND     | GND LM2596 (out-), GND da Fonte de Alimentação  |
 | Fonte de Alimentação | +24V    | DM556 +V, LM2596 in+                            |
 | Fonte de Alimentação | GND     | DM556 GND, GND ESP32, LM2596 in-                |
@@ -109,12 +105,14 @@ Configuração para Motor NEMA23, 4.01A:
 
 #### Steps
 
-Configuração para pulsos por revolução (padrão 1600 pul/rev):
+Configuração para pulsos por revolução (padrão 1600 pul/rev no hardware — o firmware usa como padrão `STEPS_PER_REV = 3200`, ou seja, compensa o microstepping 1/8):
 
 - **SW5 (MS5):** OFF
 - **SW6 (MS6):** OFF
 - **SW7 (MS7):** ON
 - **SW8 (MS8):** ON
+
+> Nota: o firmware inicia com `STEPS_PER_REV = 3200` (8× os 400 passos naturais do motor, pois o DM556 está em microstepping 1/8). Ajuste em tempo de execução com `SET_STEPS <valor>` se a sua configuração do driver for diferente; o valor é salvo na NVM.
 
 ### Conexões de Energia
 
@@ -142,9 +140,16 @@ Configuração para pulsos por revolução (padrão 1600 pul/rev):
 ## Configuração
 
 O programa está configurado para:
-- **Microstepping:** 1/8 
-- **Passos por Revolução:** 1600 
-- **Velocidade:** Ajustável via constante `SPEED_DELAY` (atualmente 500 microssegundos entre passos)
+- **Microstepping:** 1/8 (definido pelos DIP switches do DM556)
+- **Passos por Revolução (padrão do firmware):** 3200 — ajuste em tempo de execução com `SET_STEPS <valor>` (salva na NVS)
+- **Velocidade Máxima:** 8000 passos/seg — ajuste com `SET_MAX_SPEED <valor>` (salva na NVS, máx 50000)
+- **Aceleração:** 4000 passos/seg² — ajuste com `SET_ACCELERATION <valor>` (salva na NVS, máx 50000)
+- **Velocidade de Homing:** 2000 passos/seg — ajuste com `SET_SPEED <valor>` (salva na NVS, máx 50000)
+- **Tempo de Hold do Motor:** 300 ms após cada movimento — ajuste com `SET_HOLD_TIME <ms>` (salva na NVS, máx 10000)
+- **Direção de Homing:** -1 (negativa) por padrão — ajuste com `SET_HOME_DIR <-1|+1>` (salva na NVS)
+- **Slots de Posição Salvos:** 5 slots persistidos na NVS (`SAVE_POS <0-4>` / `LOAD_POS <0-4>`)
+
+Veja a tabela completa de comandos seriais abaixo para todas as opções de configuração.
 
 ## Funcionalidade do Programa
 
@@ -155,24 +160,25 @@ O programa suporta comandos seriais para controle remoto. Abra o Monitor Serial 
 
 - `JOG F <passos>`: Jog frente (horário) (1-50000)
 - `JOG B <passos>`: Jog trás (anti-horário) (1-50000)
-- `MOVE_TO <posição>`: Para posição absoluta (±1M máx)
-- `HOME`: Para posição 0
-- `RESET_HOME`: Posição atual como home (0)
-- `SAVE_POS <0-4>`: Salvar em slot 0-4
-- `LOAD_POS <0-4>`: Ir para slot 0-4
-- `GET_POS`: Posição atual
-- `FIND_HOME`: Busca home não-bloqueante com sensor limite
-- `TEST <passos>`: Teste contínuo (frente/home repetir)
+- `MOVE_TO <posição>`: Para posição absoluta (±1.000.000 máx)
+- `HOME`: Move para posição 0 (movimento absoluto, sem sensor)
+- `RESET_HOME`: Define a posição atual como novo home (0)
+- `SAVE_POS <0-4>`: Salva a posição atual no slot 0-4
+- `LOAD_POS <0-4>`: Move para a posição salva no slot 0-4
+- `GET_POS`: Imprime a posição atual (atualizada do stepper)
+- `FIND_HOME`: Busca home não-bloqueante usando o sensor Hall (debounce 50 ms, timeout 60 s)
+- `TEST <passos>`: Teste contínuo — alterna entre `<passos>` e home (repete até `STOP`)
 - `STOP`: Para teste/movimento
-- `SET_STEPS <valor>`: Passos/rev (salva NVM)
-- `SET_MAX_SPEED <0-50000>`: Vel máx passos/seg (salva)
-- `SET_ACCELERATION <0-50000>`: Acel passos/seg² (salva)
-- `SET_HOLD_TIME <0-10000>`: Tempo hold ms após movimento (salva)
-- `SET_SPEED <0-50000>`: Vel home (salva)
-- `SET_HOME_DIR <-1/+1>`: Dir home (salva)
-- `GET_INFO`: Mostra config (passos, vel, acel, hold, posições)
-- `GET_SWITCH`: Status sensor home
-- `HELP`: Mostra lista de comandos
+- `SET_STEPS <valor>`: Passos por revolução (salva NVM)
+- `SET_MAX_SPEED <0-50000>`: Velocidade máxima passos/seg (salva NVM)
+- `SET_ACCELERATION <0-50000>`: Aceleração passos/seg² (salva NVM)
+- `SET_HOLD_TIME <0-10000>`: Tempo de hold ms após movimento (salva NVM)
+- `SET_SPEED <0-50000>`: Velocidade de homing passos/seg (salva NVM)
+- `SET_HOME_DIR <-1|+1>`: Direção de homing (salva NVM)
+- `SET_POS <passos>`: Sobrescreve a posição atual para `<passos>` sem mover o motor (salva NVM)
+- `GET_INFO`: Mostra configuração e posições salvas
+- `GET_SWITCH`: Lê o status do sensor de home e atualiza o LED
+- `HELP`: Mostra a lista completa de comandos
 
 Outros: "Unknown command". 
 Exs: `JOG F 1000`, `SET_MAX_SPEED 10000`, `GET_INFO`.
@@ -180,9 +186,29 @@ Exs: `JOG F 1000`, `SET_MAX_SPEED 10000`, `GET_INFO`.
 
 ## Personalização
 
-- Modifique `SPEED_DELAY` para alterar a velocidade do motor (valores menores = mais rápido)
-- Ajuste o número de passos nos loops para diferentes ângulos de rotação
-- Use a função `moveSteps()` para movimentos personalizados
+A maioria dos parâmetros é exposta em tempo de execução via comandos seriais e persiste na NVM (namespace `"stepper"` do `Preferences`), portanto não é necessário recompilar para alterá-los:
+
+| Comando Serial       | Efeito                                                    |
+|----------------------|-----------------------------------------------------------|
+| `SET_STEPS <v>`      | Passos por revolução                                      |
+| `SET_MAX_SPEED <v>`  | Velocidade máxima (passos/seg)                            |
+| `SET_ACCELERATION <v>` | Aceleração (passos/seg²)                                |
+| `SET_HOLD_TIME <ms>` | Tempo de hold do motor após cada movimento                |
+| `SET_SPEED <v>`      | Velocidade de homing                                      |
+| `SET_HOME_DIR <d>`   | Direção de homing (-1 ou +1)                              |
+| `SET_POS <passos>`   | Sobrescreve a posição rastreada sem mover o motor         |
+
+Se desejar recompilar com outros padrões, edite as constantes no início do sketch:
+
+- `STEPS_PER_REV` — padrão de passos por revolução (padrão 3200)
+- `MAX_SPEED` — velocidade máxima padrão em passos/seg (padrão 8000)
+- `ACCELERATION` — aceleração padrão em passos/seg² (padrão 4000)
+- `HOMING_SPEED` — velocidade de homing padrão em passos/seg (padrão 2000)
+- `MOTOR_HOLD_TIME` — tempo de hold padrão em ms (padrão 300)
+- `HOME_DIRECTION` — direção de homing padrão (padrão -1)
+- `JOG_STEPS` — contagem de passos de jog padrão para o menu (padrão 50)
+
+Use as funções auxiliares `startMotorMovement(targetPos)`, `moveToPosition(target)`, `home()` e `resetHome()` para movimentos personalizados no seu próprio código.
 
 ## Depuração Serial
 
@@ -196,38 +222,56 @@ O programa gera mensagens de status no Monitor Serial a 115200 baud. Abra o Moni
 - Monitore a temperatura do motor durante a operação
 
 
-## Sistema de Menu LCD & Display de Status
+## Sistema de Menu LCD
 
-**LCD1 (0x27):** Sistema principal de menu - operação standalone (GPIO 25/26 I2C)
+**LCD (0x27):** Sistema principal de menu - operação standalone (GPIO 25/26 I2C, endereço `0x27`, 16 colunas × 2 linhas).
 
-**LCD2 (0x3F):** Display de status - mostra "Ready Sel:X", "Moving...", "Idle", "Homing..." (GPIO 25/26 I2C)
+O controlador inclui um sistema de menu LCD amigável para operação fácil sem um computador. O LCD I2C de 16x2 exibe opções de menu, e um teclado analógico de 5 botões permite navegação e entrada. Um segundo teclado analógico (7 posições) fornece seleção direta de slot e botões de jog CW/CCW.
 
-O controlador inclui um sistema de menu LCD amigável para operação fácil sem um computador. O LCD I2C de 16x2 exibe opções de menu, e um teclado analógico de 5 botões permite navegação e entrada.
+Os 8 itens do menu, na ordem exibida, são:
 
-### Opções de Menu
-
-1. **Jog**: Mover manualmente o motor inserindo o número de passos
-2. **Alterar Velocidade**: Ajustar a configuração de velocidade máxima
-3. **Alterar Aceleração**: Ajustar a configuração de aceleração
-4. **Home**: Mover o motor para a posição inicial (0)
-5. **Reset Home**: Definir a posição atual como novo home (requer confirmação)
-6. **Salvar Posição**: Salvar a posição atual em um dos 5 slots (requer confirmação)
-7. **Ir para Posição**: Mover para uma posição absoluta (pode ser negativa)
-8. **Ir para Posição Salva**: Carregar uma posição salva de um dos 5 slots
+1. **Go to Saved Pos** — carrega uma das 5 posições salvas
+2. **Change Speed** — ajusta a velocidade máxima
+3. **Change Accel** — ajusta a aceleração
+4. **Home** — move para posição 0 (sem sensor)
+5. **Reset Home** — define a posição atual como novo home (requer confirmação)
+6. **Save Position** — salva a posição atual em um dos 5 slots
+7. **Go to Pos** — move para uma posição absoluta (pode ser negativa)
+8. **Jog** — ajusta a contagem de passos de jog usada pelas teclas seriais `JOG F`/`JOG B`
 
 ### Controles do Teclado
 
-- **Cima/Baixo**: Navegar pelos itens do menu
-- **Esquerda/Direita**: Ajustar valores em sub-menus (incrementar/decrementar por 10)
-- **Cima/Baixo no sub-menu**: Ajustar valores por 100
-- **Selecionar (Vermelho)**: Entrar no sub-menu ou executar ação
+O keypad de navegação (GPIO 35) é lido com 5 limiares — teclas 1-5. Mapeamento:
+
+- **Tecla 1**: Cima / decremento / alterna em sub-menus
+- **Tecla 2**: Baixo / incremento / alterna em sub-menus
+- **Tecla 3**: Decrementa 100 (em sub-menus numéricos)
+- **Tecla 4**: Incrementa 100 / cancela sub-menu
+- **Tecla 5**: Selecionar — entra no sub-menu ou executa ação
+
+No menu principal: teclas 1/2 navegam, tecla 5 seleciona.
+Em sub-menus numéricos (Speed, Accel, Go-to, Jog): tecla 1 = -10, tecla 2 = +10, tecla 3 = -100, tecla 4 = +100, tecla 5 = confirmar.
+Nos sub-menus de seleção de slot (Goto Saved, Save Pos): teclas 1/2 alternam 0–4, tecla 5 = confirmar.
+No sub-menu de confirmação (Reset Home): teclas 1/2 alternam Sim/Não, tecla 5 = confirmar.
+
+### Painel de Botões Diretos (GPIO 34)
+
+O painel de 7 teclas é lido por meio de 7 limiares ADC:
+
+- **Teclas 1-5**: selecionam o slot de posição (slot = tecla - 1, ou seja, tecla 1 = slot 0 ... tecla 5 = slot 4). A linha superior do LCD mostra o slot e a posição salva; a linha inferior mostra posição atual / Moving / Homing.
+- **Tecla 6**: jog CCW em direção à posição salva atualmente selecionada (caminho mais curto)
+- **Tecla 7**: jog CW em direção à posição salva atualmente selecionada (caminho mais curto)
+
+Depois que o jog termina, o firmware usa `SET_POS` internamente para atualizar a posição rastreada para o slot de destino, para que o controlador nunca perca a referência absoluta após um jog com wrap-around.
 
 ### Navegação do Menu
 
 1. Use os botões Cima/Baixo para selecionar um item do menu
 2. Pressione Selecionar para entrar no sub-menu desse item
-3. Use Esquerda/Direita/Cima/Baixo para ajustar o valor
-4. Pressione Selecionar novamente para executar a ação e retornar ao menu principal
+3. Use o teclado para ajustar o valor (ou alternar Sim/Não)
+4. Pressione Selecionar para executar e voltar ao menu principal, ou pressione Tecla 4 para cancelar
+
+O firmware também executa uma calibração de homing no boot — `findHomeDirection(1)` é chamado uma vez após o splash do LCD, para que o controlador comece cada sessão a partir de uma referência conhecida.
 
 
 ## Autor
@@ -236,6 +280,6 @@ O controlador inclui um sistema de menu LCD amigável para operação fácil sem
 
 Eng. Fredy Osorio  
 ing.fredyosorio@gmail.com  
-Rio de Janeiro - Brasil, abril de 2026.
+Rio de Janeiro - Brasil, 2026.
 
 

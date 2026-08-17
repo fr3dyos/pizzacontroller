@@ -38,9 +38,14 @@ Siga os passos por categoria de problema, do mais simples para o mais provável.
    - Corrente muito alta → motor/driver aquecem muito (ver seção Aquecimento Excessivo).
 
 5. **Firmware rodando**
-   - No Monitor Serial (115200 baud), após reset, verifique se aparecem mensagens como:  
-     - `Pizza Controller - FIXED VERSION`  
+   - No Monitor Serial (115200 baud), após reset, verifique se aparecem as mensagens:  
+     - `========================================`  
+     - `Pizza Controller - LOEM PUC-Rio`  
+     - `========================================`  
+     - Bloco de configuração do motor (steps, velocidade, acel, hold, direção de homing, posições salvas)  
+     - Bloco de ajuda `Serial Commands`  
      - `System ready!`  
+   - O sketch também roda uma calibração de homing no boot (`findHomeDirection(1)` depois do splash) — se o homing não completar, confira o sensor de home e o `HOME_DIRECTION`.  
    - Se nada aparece, verifique cabo USB de dados, porta COM e seleção de placa no Arduino IDE.
 
 6. **Brown-out / reset ao tentar mover**
@@ -49,56 +54,45 @@ Siga os passos por categoria de problema, do mais simples para o mais provável.
 
 ---
 
-## Botões Diretos/Ação/E-Stop Não Respondem
+## Botões Diretos / Keypad / E-Stop Não Respondem
 
 1. **Pinos e alimentação**
-   - GPIO 34: Botões diretos 5-posições (analógico, VCC 3,3V, GND comum) - slots 0-4
-   - GPIO 32: Botões ação (analógico, 3,3V) - CW/CCW
-   - GPIO 33: E-Stop (digital INPUT_PULLUP, ativo LOW)
-   - Meça tensão GPIO 34/32 vs GND por botão; níveis devem diferir
-
-2. **Limiares analógicos no código**
-   ```
-   ACTION: 300/900 (CW/CCW)
-   DIRECT: 320/1000/1800/2800/3600
-   ```
-
-
-1. **Pinos e alimentação**
-   - GPIO 34: Botões de Posição Direta (analógico, 5 posições, VCC 3,3 V e GND comum).  
-   - GPIO 35: Keypad de Navegação (analógico, também em 3,3 V).  
-   - Meça a tensão entre GPIO 34/35 e GND ao pressionar cada botão; os níveis devem ser diferentes (divisor resistivo).
+   - GPIO 34: Botões diretos de 7 posições (analógico, VCC 3,3 V, GND comum). Teclas 1-5 = slots 0-4; teclas 6/7 = jog CCW/CW em direção ao slot selecionado.
+   - GPIO 35: Keypad de navegação (analógico, 3,3 V, 5 teclas).
+   - GPIO 33: E-Stop (digital, INPUT_PULLUP, ativo em LOW).
+   - Meça a tensão em cada GPIO vs GND ao pressionar cada botão; os níveis devem ser diferentes (divisor resistivo).
+   - **GPIO 32 NÃO é entrada de botão** — é uma saída digital para o LED de status do home (espelha o `GET_SWITCH`).
 
 2. **Limiares analógicos no código**
    ```md
-   KEYPAD: 220 / 800 / 1400 / 2300 / 3600
-   DIRECT: 320 / 1000 / 1800 / 2800 / 3600
-   HOME:   <1500
+   KEYPAD:  220 / 800 / 1400 / 2300 / 3600          (5 teclas, GPIO 35)
+   DIRECT:  130 / 570 / 1170 / 1740 / 2370 / 3100 / 3700  (7 teclas, GPIO 34)
+   HOME:    <1500                                    (GPIO 27, A3144)
    ```
-   - Se as leituras ADC (via Serial) não baterem com esses intervalos, ajuste os limiares no código.  
+   - Se as leituras ADC (via Serial) não baterem com esses intervalos, ajuste as constantes de limiar no início do sketch.
 
 3. **Teste via Serial**
-   - Ao pressionar os botões, o Monitor Serial deve exibir mensagens como:  
-     - `Direct keypad button X pressed`  
+   - Pressionar um botão direto → Serial: `Position slot N` (teclas 1-5) ou `Going to saved position ... D: CW/CCW` (teclas 6/7).
+   - Pressionar uma tecla de navegação → Serial: navega o menu / altera `inputValue` (sem linha de debug a menos que você adicione).
    - Confirme também se os slots 0–4 carregam posições salvas quando o botão correspondente é acionado.
 
 ---
 
 ## LCD Não Aparece
 
-1. **Fiação I2C (Dual LCD)**
-   - **LCD1 (principal, 0x27):** SDA1 GPIO 25, SCL1 GPIO 26 (Wire/I2C1)
-   - **LCD2 (status, 0x3F):** SDA2 GPIO 22, SCL2 GPIO 23 (Wire2/I2C2)
-   - Ambas VCC → 5V LM2596, GND comum
-   - Adicione pullups 4.7k para 3.3V em cada par SDA/SCL se instável
+1. **Fiação I2C (LCD único)**
+   - **LCD (principal, 0x27):** SDA GPIO 25, SCL GPIO 26 (Wire/I2C1)
+   - VCC → 5V LM2596, GND comum
+   - Adicione pullups 4,7k para 3,3V no par SDA/SCL se a exibição estiver instável
    - Verifique sem inversões, GND comum
+   - O firmware atual inicializa **apenas um** LCD no barramento Wire padrão (endereço 0x27). Os GPIOs 22/23 ficam livres.
 
 2. **Endereço I2C**
    - Endereço padrão usado no código: `0x27`.  
-   - Alguns módulos utilizam `0x3F`; use um “I2C scanner” no ESP32 para descobrir o endereço real antes de fixá-lo no código.
+   - Alguns módulos utilizam `0x3F`; use um “I2C scanner” no ESP32 para descobrir o endereço real e ajuste o `#define LCD_ADDR` no início do sketch.
 
 3. **Inicialização**
-   - Se o Serial mostra as mensagens iniciais (“Pizza Ctrl FIXED”), mas o LCD fica apagado:
+   - Se o Serial mostra o banner de boot, mas o LCD fica apagado:
      - Problema provável é hardware (alimentação/I2C) ou endereço incorreto.  
    - Ajuste o endereço e a inicialização da `LiquidCrystal_I2C` conforme o módulo.
 
@@ -211,9 +205,10 @@ GET_SWITCH
 JOG F 50        (teste pequeno de movimento)
 FIND_HOME       (verificar sensor de home)
 TEST 100        (loop frente/home para stress-test)
+SET_POS 0       (redefine a posição rastreada sem mover, útil após movimentos manuais)
 
 Menu:
-Navegar com Up/Down → Select (botão vermelho) para executar ações
+Navegar com Up/Down → Select (tecla 5) para executar ações
 ```
 
 ---

@@ -37,8 +37,13 @@ This guide helps diagnose and resolve common issues with PizzaController (ESP32,
 
 5. **Firmware Running**
    - Serial Monitor (115200): After reset, expect:
-     - `Pizza Controller - FIXED VERSION`
+     - `========================================`
+     - `Pizza Controller - LOEM PUC-Rio`
+     - `========================================`
+     - Motor configuration block (steps, speed, accel, hold, home direction, saved positions)
+     - `Serial Commands` help block
      - `System ready!`
+   - The sketch also runs a homing calibration on boot (`findHomeDirection(1)` after the splash) — if homing doesn't complete, check the home sensor and `HOME_DIRECTION`.
    - No messages → check USB data cable, COM port, board selection.
 
 6. **Brown-out/Reset During Movement**
@@ -47,56 +52,46 @@ This guide helps diagnose and resolve common issues with PizzaController (ESP32,
 
 ---
 
-## Direct/Action/E-Stop Buttons Not Responding
+## Direct/Keypad/E-Stop Buttons Not Responding
 
 1. **Pins and Power**
-   - GPIO 34: Direct 5-pos buttons (analog, 3.3V VCC, common GND) - position slots 0-4
-   - GPIO 32: Action buttons (analog, 3.3V) - CW/CCW moves
-   - GPIO 33: E-Stop (digital INPUT_PULLUP, active LOW)
-   - Measure voltage GPIO 34/32 to GND per button; levels must differ
+   - GPIO 34: Direct 7-pos buttons (analog, 3.3V VCC, common GND). Keys 1-5 = position slots 0-4; keys 6/7 = CCW/CW jog toward the selected slot.
+   - GPIO 35: Navigation keypad (analog, 3.3V, 5 keys).
+   - GPIO 33: E-Stop (digital INPUT_PULLUP, active LOW).
+   - Measure voltage on each GPIO to GND per button; levels must differ (resistor ladder).
+   - **GPIO 32 is NOT a button input** — it's a digital output for the home-status LED (mirrors `GET_SWITCH`).
 
 2. **Code Analog Thresholds**
    ```
-   ACTION: 300/900 (CW/CCW)
-   DIRECT: 320/1000/1800/2800/3600
+   KEYPAD:  220/800/1400/2300/3600          (5 keys, GPIO 35)
+   DIRECT:  130/570/1170/1740/2370/3100/3700 (7 keys, GPIO 34)
+   HOME:    <1500                           (GPIO 27, A3144 hall)
    ```
-
-
-1. **Pins and Power**
-   - GPIO 34: Direct 5-pos buttons (analog, 3.3V VCC, common GND).
-   - GPIO 35: Navigation keypad (analog, 3.3V).
-   - Measure voltage GPIO 34/35 to GND per button; levels must differ (resistor ladder).
-
-2. **Code Analog Thresholds**
-   ```
-   KEYPAD: 220/800/1400/2300/3600
-   DIRECT: 320/1000/1800/2800/3600
-   HOME:   <1500
-   ```
-   - If ADC readings (Serial) don't match intervals, adjust code thresholds.
+   - If ADC readings (Serial) don't match these intervals, adjust the threshold constants at the top of the sketch.
 
 3. **Serial Test**
-   - Press buttons → Serial: `Direct keypad button X pressed`.
+   - Press a direct-button → Serial: `Position slot N` (for keys 1-5) or `Going to saved position ... D: CW/CCW` (for keys 6/7).
+   - Press a navigation key → Serial: navigates the menu / changes `inputValue` (no debug line unless you add one).
    - Confirm slots 0-4 load saved positions on press.
 
 ---
 
 ## LCD Not Displaying
 
-1. **I2C Wiring (Dual LCD)**
-   - **LCD1 (main, 0x27):** SDA1 GPIO 25, SCL1 GPIO 26 (Wire/I2C1)
-   - **LCD2 (status, 0x3F):** SDA2 GPIO 22, SCL2 GPIO 23 (Wire2/I2C2)
-   - Both VCC → 5V LM2596, GND common
-   - Add 4.7k pullups to 3.3V on each SDA/SCL pair if unstable
+1. **I2C Wiring (single LCD)**
+   - **LCD (main, 0x27):** SDA GPIO 25, SCL GPIO 26 (Wire/I2C1)
+   - VCC → 5V LM2596, GND common
+   - Add 4.7k pullups to 3.3V on SDA/SCL if the display is unstable
    - Check no swaps, common GND
+   - The current firmware initializes **only one** LCD on the default Wire bus (address 0x27). GPIO 22/23 are unused.
 
 2. **I2C Address**
    - Code default: `0x27`.
-   - Some modules use `0x3F`; run ESP32 I2C scanner to find actual address.
+   - Some modules use `0x3F`; run an ESP32 I2C scanner to find the actual address and edit `#define LCD_ADDR` at the top of the sketch.
 
 3. **Initialization**
-   - Serial shows "Pizza Ctrl FIXED" but LCD blank → hardware (power/I2C) or wrong address.
-   - Adjust `LiquidCrystal_I2C` address/init per module.
+   - Serial shows the boot banner but LCD is blank → likely hardware (power/I2C) or wrong address.
+   - Adjust the `LiquidCrystal_I2C` constructor address/init per module.
 
 ---
 
@@ -205,9 +200,10 @@ GET_SWITCH
 JOG F 50        (small movement test)
 FIND_HOME       (verify home sensor)
 TEST 100        (forward/home loop stress-test)
+SET_POS 0       (reset tracked position without moving, useful after manual moves)
 
 Menu:
-Navigate Up/Down → Red Select to execute
+Navigate Up/Down → Red Select (key 5) to execute
 ```
 
 ---
