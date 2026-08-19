@@ -29,6 +29,18 @@
 // - SET_POS <steps>: Override current position tracking to <steps> without moving motor
 // - HELP: Shows all the Serial Commands
 
+
+
+// CONFIGURAÇÃO DO MOTOR PARA DEPOSIÇÃO DO LiF:
+// - Steps per revolution: 12800
+// - Max speed (steps/sec): 1600.00
+// - Acceleration (steps2/sec): 300.00
+// - Homing speed (steps/sec): 1600.00
+
+
+
+
+
 // ============================================================================
 // INCLUDES
 // ============================================================================
@@ -518,7 +530,7 @@ void scheduleMotorDisable()
 // ============================================================================
 void findHomeDirection(int direction)
 {
-  int startPoint = int(STEPS_PER_REV/10);
+  int startPoint = int(STEPS_PER_REV/4);
   startMotorMovement(startPoint*-1*direction);
   delay(1000); 
   setHomeDirection(direction);
@@ -698,7 +710,7 @@ void processCommand(String command)
   }
   else if (command == "FIND_HOME")
   {
-    startFindHome();
+    findHomeDirection(1);
   }
   else if (command.startsWith("TEST "))
   {
