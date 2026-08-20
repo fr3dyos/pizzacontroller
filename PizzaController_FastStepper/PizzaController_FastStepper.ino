@@ -23,7 +23,9 @@
 // - SET_HOLD_TIME <ms>: Set motor hold time after move (0-10000 ms)
 // - SET_SPEED <value>: Set homing speed and save to memory (0 < value <= 50000)
 // - SET_HOME_DIR <dir>: Set homing direction (-1 or +1) and save to memory
-// - GET_INFO: Display motor configuration (steps, speed, acceleration, hold time)
+// - SET_HYST_POS <value>: Set positive rotation hysteresis compensation steps (X) and save
+// - SET_HYST_NEG <value>: Set negative rotation hysteresis compensation steps (Y) and save
+// - GET_INFO: Display motor configuration (steps, speed, acceleration, hold time, hysteresis)
 // - GET_SWITCH: Read home limit switch status
 // - SET_POS <steps>: Override current position tracking to <steps> without moving motor
 // - HELP: Shows all the Serial Commands
@@ -155,6 +157,8 @@ const float HOMING_SLOW_SPEED = 200.0;
 const long HOMING_BACKOFF_STEPS = 1000;
 int JOG_STEPS = 50;
 int HOME_DIRECTION = 1; // 1 = move positive to find home
+int HYSTERESIS_POS_STEPS = 0; // Positive rotation (CW) compensation steps (X)
+int HYSTERESIS_NEG_STEPS = 0; // Negative rotation (CCW) compensation steps (Y)
 int lastDirectKey = 0;   // For direct button state tracking
 
 const long MAX_JOG_STEPS = 50000;
@@ -274,6 +278,8 @@ void setAcceleration(float value);
 void setMotorHoldTime(unsigned long value);
 void setHomingSpeed(float value);
 void setHomeDirection(int value);
+void setHysteresisPos(int value);
+void setHysteresisNeg(int value);
 void setPositionWithoutMoving(long newPos);
 
 void startTestAccel(long steps);
@@ -343,6 +349,8 @@ void setup()
   HOMING_SPEED = preferences.getFloat("homingSpeed", 1600.0);
   HOME_DIRECTION = 1; // Always positive homing direction (+1)
   preferences.putInt("homeDir", HOME_DIRECTION);
+  HYSTERESIS_POS_STEPS = preferences.getInt("hystPos", 0);
+  HYSTERESIS_NEG_STEPS = preferences.getInt("hystNeg", 0);
 
   // Validate and clamp loaded values
   if (STEPS_PER_REV <= 0)
@@ -353,6 +361,10 @@ void setup()
     ACCELERATION = 300.0;
   if (HOMING_SPEED <= 0 || HOMING_SPEED > MAX_SPEED_LIMIT)
     HOMING_SPEED = 1600.0;
+  if (HYSTERESIS_POS_STEPS < 0 || HYSTERESIS_POS_STEPS > MAX_JOG_STEPS)
+    HYSTERESIS_POS_STEPS = 0;
+  if (HYSTERESIS_NEG_STEPS < 0 || HYSTERESIS_NEG_STEPS > MAX_JOG_STEPS)
+    HYSTERESIS_NEG_STEPS = 0;
 
   // Initialize FastAccelStepper engine
   engine.init();
@@ -839,6 +851,16 @@ void processCommand(String command)
     int value = command.substring(13).toInt();
     setHomeDirection(value);
   }
+  else if (command.startsWith("SET_HYST_POS "))
+  {
+    int value = command.substring(13).toInt();
+    setHysteresisPos(value);
+  }
+  else if (command.startsWith("SET_HYST_NEG "))
+  {
+    int value = command.substring(13).toInt();
+    setHysteresisNeg(value);
+  }
   else if (command == "GET_INFO")
   {
     motorInfo();
@@ -888,6 +910,10 @@ void motorInfo()
   Serial.println(HOMING_SPEED);
   Serial.print(F("- Homing direction: "));
   Serial.println(HOME_DIRECTION);
+  Serial.print(F("- Hysteresis Pos (+/CW) steps: "));
+  Serial.println(HYSTERESIS_POS_STEPS);
+  Serial.print(F("- Hysteresis Neg (-/CCW) steps: "));
+  Serial.println(HYSTERESIS_NEG_STEPS);
   Serial.print(F("- Motor hold time (ms): "));
   Serial.println(MOTOR_HOLD_TIME);
   Serial.println();
@@ -924,7 +950,9 @@ void help()
   Serial.println(F("- SET_HOLD_TIME <ms>: Set motor hold time after move (0-10000 ms)"));
   Serial.println(F("- SET_SPEED <value>: Set homing speed and save to memory (0 < value <= 50000)"));
   Serial.println(F("- SET_HOME_DIR <dir>: Set homing direction (-1 or +1) and save to memory"));
-  Serial.println(F("- GET_INFO: Display motor configuration (steps, speed, acceleration, hold time)"));
+  Serial.println(F("- SET_HYST_POS <value>: Set positive rotation hysteresis compensation steps (X) and save"));
+  Serial.println(F("- SET_HYST_NEG <value>: Set negative rotation hysteresis compensation steps (Y) and save"));
+  Serial.println(F("- GET_INFO: Display motor configuration (steps, speed, acceleration, hold time, hysteresis)"));
   Serial.println(F("- GET_SWITCH: Read home limit switch status"));
   Serial.println(F("- SET_POS <steps>: Override current position tracking to <steps> without moving motor"));
   Serial.println(F("- HELP: Shows all the Serial Commands"));
@@ -948,12 +976,33 @@ void startMotorMovement(long targetPos)
 
   enableMotor();
   targetPos = constrain(targetPos, -MAX_POSITION, MAX_POSITION);
-  motorTargetPosition = targetPos;
+  long curPos = getCurrentPosition();
+
+  // If already at target, skip movement
+  if (targetPos == curPos)
+  {
+    logSmart("Already at target position");
+    return;
+  }
+
+  motorTargetPosition = targetPos; // Store nominal logical target
+
+  // Apply directional hysteresis compensation (X steps for positive, Y steps for negative)
+  long physicalTarget = targetPos;
+  if (targetPos > curPos)
+  {
+    physicalTarget += HYSTERESIS_POS_STEPS;
+  }
+  else if (targetPos < curPos)
+  {
+    physicalTarget -= HYSTERESIS_NEG_STEPS;
+  }
+  physicalTarget = constrain(physicalTarget, -MAX_POSITION, MAX_POSITION);
 
   stepper->setSpeedInHz((uint32_t)MAX_SPEED);
   stepper->setAcceleration((uint32_t)ACCELERATION);
 
-  stepper->moveTo(targetPos);
+  stepper->moveTo(physicalTarget);
 
   isMotorMoving = true;
   motorMoveStartTime = millis();
@@ -967,7 +1016,8 @@ void updateMotorMovement()
   if (!stepper->isRunning())
   {
     isMotorMoving = false;
-    currentPosition = stepper->getCurrentPosition(); // Update cache
+    currentPosition = motorTargetPosition; // Nominal logical coordinate
+    stepper->setCurrentPosition(currentPosition); // Sync internal coordinate to nominal
     preferences.putLong("currPos", currentPosition);
 
     logSmart("Movement complete. Position: " + String(currentPosition));
@@ -1152,6 +1202,34 @@ void setHomeDirection(int value)
   else
   {
     logSmart("ERROR: Homing direction must be -1 or +1");
+  }
+}
+
+void setHysteresisPos(int value)
+{
+  if (value >= 0 && value <= MAX_JOG_STEPS)
+  {
+    HYSTERESIS_POS_STEPS = value;
+    preferences.putInt("hystPos", HYSTERESIS_POS_STEPS);
+    logSmart("Positive hysteresis (CW) set to: " + String(HYSTERESIS_POS_STEPS) + " steps");
+  }
+  else
+  {
+    logSmart("ERROR: Positive hysteresis must be 0 <= steps <= " + String(MAX_JOG_STEPS));
+  }
+}
+
+void setHysteresisNeg(int value)
+{
+  if (value >= 0 && value <= MAX_JOG_STEPS)
+  {
+    HYSTERESIS_NEG_STEPS = value;
+    preferences.putInt("hystNeg", HYSTERESIS_NEG_STEPS);
+    logSmart("Negative hysteresis (CCW) set to: " + String(HYSTERESIS_NEG_STEPS) + " steps");
+  }
+  else
+  {
+    logSmart("ERROR: Negative hysteresis must be 0 <= steps <= " + String(MAX_JOG_STEPS));
   }
 }
 

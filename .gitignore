@@ -90,3 +90,4 @@ logs/
 # test files
 PizzaController_AccelStepper
 TODO*
+.claude
