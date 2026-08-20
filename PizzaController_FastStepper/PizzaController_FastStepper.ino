@@ -1,23 +1,22 @@
 // PizzaController_FastAccelStepper.ino
 // ESP32 Stepper Controller with DM556 Driver - PRODUCTION-READY VERSION
-// Features: Non-blocking control, anti-overheating, position saving, LCD menu, optimized for speed
-// Fixes Applied: ISR safety, non-blocking I/O, motor hold logic, array sizing, cached position refresh
+// Hardware: ESP32, NEMA23 57HS56-1504A08-D21 (1.5A), DM556, 24V/5A PSU, 12800 steps/rev
+// Pins: STEP=18, DIR=19, ENABLE=21, HOME=27, ESTOP=33, LCD SDA=25 SCL=26
 // Original Author: Eng. Fredy Osorio <ing.fredyosorio@gmail.com>
-// Fixed Version: February 9, 2026
-// Based on: FastAccelStepper library for high-performance stepper control
+// Optimized & Fixed Version: February 2026
 
 // Serial Commands:
 // - JOG F <steps>: Jog forward (clockwise) by <steps> steps
 // - JOG B <steps>: Jog backward (counterclockwise) by <steps> steps
 // - MOVE_TO <position>: Move to absolute position <position>
 // - HOME: Move to home position (0)
-// - RESET_HOME: Set current position as new home
+// - RESET_HOME: Set current position as new home (0)
 // - SAVE_POS <num>: Save current position to slot <num> (0-4)
-// - LOAD_POS <num>: Load position from slot <num>
+// - LOAD_POS <num>: Load position from slot <num> (0-4)
 // - GET_POS: Print current position
-// - FIND_HOME: Find home using limit switch (non-blocking)
+// - FIND_HOME: Find home using limit switch (two-stage non-blocking)
 // - TEST <steps>: Start continuous test with <steps> steps
-// - STOP: Stop the test
+// - STOP: Stop continuous test
 // - SET_STEPS <value>: Set steps per revolution and save to memory
 // - SET_MAX_SPEED <value>: Set maximum speed and save to memory (0 < value <= 50000)
 // - SET_ACCELERATION <value>: Set acceleration and save to memory (0 < value <= 50000)
@@ -28,18 +27,6 @@
 // - GET_SWITCH: Read home limit switch status
 // - SET_POS <steps>: Override current position tracking to <steps> without moving motor
 // - HELP: Shows all the Serial Commands
-
-
-
-// CONFIGURAÇÃO DO MOTOR PARA DEPOSIÇÃO DO LiF:
-// - Steps per revolution: 12800
-// - Max speed (steps/sec): 1600.00
-// - Acceleration (steps2/sec): 300.00
-// - Homing speed (steps/sec): 1600.00
-
-
-
-
 
 // ============================================================================
 // INCLUDES
@@ -66,7 +53,7 @@
 #define KEYPAD_PIN 35
 #define DIRECT_KEYPAD_PIN 34
 
-#define ESTOP_PIN 33    // Digital input, NC button (active LOW)
+#define ESTOP_PIN 33    // Digital input, NC button (active LOW when closed to GND; HIGH when opened/pressed)
 #define LED_HOME_PIN 32 // Optional: onboard LED for home status indication
 
 // ============================================================================
@@ -77,7 +64,7 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 // ============================================================================
 // KEYPAD CALIBRATION CONSTANTS
 // ============================================================================
-// Main keypad thresholds (adjust based on your hardware)
+// Main keypad thresholds
 const int KEYPAD_THRESHOLD_1 = 220;
 const int KEYPAD_THRESHOLD_2 = 800;
 const int KEYPAD_THRESHOLD_3 = 1400;
@@ -113,10 +100,15 @@ enum SubMenu
   CONFIRM_SAVE_POS
 };
 
-enum HomingState
-{
+
+enum HomingState {
   HOMING_IDLE,
-  HOMING_MOVING,
+  HOMING_INITIAL_BACKOFF,
+  HOMING_STAGE1_FAST,
+  HOMING_STAGE1_STOPPING,
+  HOMING_BACKOFF,
+  HOMING_STAGE2_SLOW,
+  HOMING_STAGE2_STOPPING,
   HOMING_DONE
 };
 
@@ -153,14 +145,16 @@ struct SerialLogBuffer
 };
 
 // ============================================================================
-// MOTOR CONFIGURATION
+// MOTOR CONFIGURATION (Default parameters matching hardware requirements)
 // ============================================================================
-int STEPS_PER_REV = 3200;
-float MAX_SPEED = 8000.0;
-float ACCELERATION = 4000.0;
-float HOMING_SPEED = 2000.0;
+int STEPS_PER_REV = 12800;
+float MAX_SPEED = 1600.0;
+float ACCELERATION = 300.0;
+float HOMING_SPEED = 1600.0;
+const float HOMING_SLOW_SPEED = 200.0;
+const long HOMING_BACKOFF_STEPS = 1000;
 int JOG_STEPS = 50;
-int HOME_DIRECTION = -1; // -1 = move negative to find home, +1 = move positive
+int HOME_DIRECTION = 1; // 1 = move positive to find home
 int lastDirectKey = 0;   // For direct button state tracking
 
 const long MAX_JOG_STEPS = 50000;
@@ -168,7 +162,7 @@ const long MAX_POSITION = 1000000;
 const float MAX_SPEED_LIMIT = 50000.0;
 const float MAX_ACCEL_LIMIT = 50000.0;
 
-unsigned long MOTOR_HOLD_TIME = 300;
+unsigned long MOTOR_HOLD_TIME = 300; // Deprecated hold-time setting, kept for NVS compatibility
 unsigned long motorDisableTime = 0;
 bool motorShouldDisable = false;
 
@@ -176,15 +170,20 @@ bool motorShouldDisable = false;
 // MOTOR STATE MANAGEMENT
 // ============================================================================
 bool isMotorMoving = false;
-long motorTargetPosition = 0;
+long motorTargetPosition = 0;       // Target absolute motor position for active move
 unsigned long motorMoveStartTime = 0;
 
 HomingState homingState = HOMING_IDLE;
 unsigned long homingStartTime = 0;
+unsigned long homingStopStartTime = 0;
 
 // ============================================================================
 // POSITION AND STORAGE STATE
 // ============================================================================
+// Semantic Definitions:
+// - currentPosition: Cached absolute motor step count (synchronized with stepper->getCurrentPosition())
+// - homePosition: Saved reference coordinate/offset in NVS
+// - savedPositions[5]: Array of user-saved absolute coordinates (slots 0 to 4)
 long currentPosition = 0;
 long homePosition = 0;
 long savedPositions[5] = {0};
@@ -204,8 +203,8 @@ unsigned long lastTestTime = 0; // For non-blocking test timing
 int menuIndex = 0;
 const int menuSize = 8;
 String menuItems[8] = {
-  "Go to Saved Pos", "Change Speed", "Change Accel", "Home",
-  "Reset Home", "Save Position", "Go to Pos", "Jog"
+  "Saved Pos", "Change Speed", "Change Accel", "Home",
+  "Reset Home", "Save Position", "Move to", "Jog"
 };
 
 bool inSubMenu = false;
@@ -214,14 +213,12 @@ long inputValue = 0;
 bool inputDirection = true;
 int lastKey = 0;
 unsigned long lastKeyTime = 0;
-const unsigned long debounceDelay = 300; // Reduced from 200ms for better responsiveness
+const unsigned long debounceDelay = 300;
 
 // ============================================================================
 // DIRECT BUTTON STATE
 // ============================================================================
-long targetPos = 0; // For direct button target position
-bool flag = false;
-int selectedPositionIndex = -1; // -1=none, 0-4=selected slot
+int selectedPositionIndex = -1; // -1 = none, 0-4 = selected slot (0-4)
 int lastSelectedPosIndex = -1;
 bool lastMotorState = false;
 
@@ -269,7 +266,6 @@ void loadPositionFromSlot(int num);
 void moveToPosition(long targetPosition);
 void home();
 void resetHome();
-void resetPosition();
 long getCurrentPosition();
 
 void setStepsPerRev(int value);
@@ -294,7 +290,7 @@ void logSmart(const String &msg);
 void motorInfo();
 void help();
 
-long calculateGoToSavedPosition(long currentPos, long targetPos, long STEPS_PER_REV, String direction);
+long calculateGoToSavedPosition(long currentPos, long targetPos, long stepsPerRev, const String &direction);
 long calculateJogToPosition(long currentPos, long targetPos, long fullRotation, bool rotationDirection);
 
 // ============================================================================
@@ -328,17 +324,7 @@ void setup()
   pinMode(ENABLE_PIN, OUTPUT);
   pinMode(HOME_SWITCH_PIN, INPUT_PULLUP);
   pinMode(LED_HOME_PIN, OUTPUT);
-  digitalWrite(ENABLE_PIN, HIGH); // Motor initially disabled... // Init FastAccelStepper
-
-  engine.init();
-  stepper = engine.stepperConnectToPin(STEP_PIN);
-  if (stepper)
-  {
-    stepper->setDirectionPin(DIR_PIN);
-    stepper->setEnablePin(ENABLE_PIN, true); // Active low
-    stepper->setAutoEnable(false);           // Manual enable/disable control
-    stepper->setCurrentPosition(0);
-  }
+  pinMode(ESTOP_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
   delay(500);
@@ -350,26 +336,38 @@ void setup()
   preferences.begin("stepper", false);
   homePosition = preferences.getLong("homePos", 0);
   currentPosition = preferences.getLong("currPos", 0);
-  STEPS_PER_REV = preferences.getInt("stepsPerRev", 3200);
-  MAX_SPEED = preferences.getFloat("maxSpeed", 8000.0);
-  ACCELERATION = preferences.getFloat("acceleration", 4000.0);
+  STEPS_PER_REV = preferences.getInt("stepsPerRev", 12800);
+  MAX_SPEED = preferences.getFloat("maxSpeed", 1600.0);
+  ACCELERATION = preferences.getFloat("acceleration", 300.0);
   MOTOR_HOLD_TIME = preferences.getULong("holdTime", 300);
-  HOMING_SPEED = preferences.getFloat("homingSpeed", 2000.0);
-  HOME_DIRECTION = preferences.getInt("homeDir", -1);
+  HOMING_SPEED = preferences.getFloat("homingSpeed", 1600.0);
+  HOME_DIRECTION = 1; // Always positive homing direction (+1)
+  preferences.putInt("homeDir", HOME_DIRECTION);
 
   // Validate and clamp loaded values
+  if (STEPS_PER_REV <= 0)
+    STEPS_PER_REV = 12800;
   if (MAX_SPEED <= 0 || MAX_SPEED > MAX_SPEED_LIMIT)
-    MAX_SPEED = 8000.0;
+    MAX_SPEED = 1600.0;
   if (ACCELERATION <= 0 || ACCELERATION > MAX_ACCEL_LIMIT)
-    ACCELERATION = 4000.0;
-  if (HOME_DIRECTION != -1 && HOME_DIRECTION != 1)
-    HOME_DIRECTION = -1;
+    ACCELERATION = 300.0;
+  if (HOMING_SPEED <= 0 || HOMING_SPEED > MAX_SPEED_LIMIT)
+    HOMING_SPEED = 1600.0;
 
+  // Initialize FastAccelStepper engine
+  engine.init();
+  stepper = engine.stepperConnectToPin(STEP_PIN);
   if (stepper)
   {
+    // Configure DIR pin with 200us direction change delay for DM556 optocoupler safety
+    stepper->setDirectionPin(DIR_PIN, true, 200);
+    // Configure ENABLE pin (low_active_enables_stepper = true)
+    stepper->setEnablePin(ENABLE_PIN, true);
+    stepper->setAutoEnable(false);
     stepper->setSpeedInHz((uint32_t)MAX_SPEED);
     stepper->setAcceleration((uint32_t)ACCELERATION);
     stepper->setCurrentPosition(currentPosition);
+    stepper->enableOutputs(); // Energize motor and hold position permanently
   }
 
   // Load saved positions with validation
@@ -392,15 +390,9 @@ void setup()
   motorInfo();
   help();
 
-  pinMode(ESTOP_PIN, INPUT_PULLUP);
-
-  int lastSelectedPosIndex = -1;
-  bool lastMotorState = false;
-
   // LCD init (main menu)
   Wire.begin(LCD_SDA, LCD_SCL);
   lcd.begin(Wire);
-
   lcd.backlight();
   lcd.setCursor(0, 0);
   lcd.print(F("  LOEM PUC-Rio  "));
@@ -408,13 +400,12 @@ void setup()
   lcd.print(F("Pizza  Control"));
 
   delay(2000);
-  updateMenuDisplay();
 
   Serial.println(F("System ready!"));
 
-  // Calibration on the start of the equippment
-  findHomeDirection(1);
-  delay(1000);
+  // Initiate non-blocking homing calibration at startup
+  startFindHome();
+  updateMenuDisplay();
 }
 
 // ============================================================================
@@ -422,11 +413,8 @@ void setup()
 // ============================================================================
 void loop()
 {
-  // E-Stop check - immediate stop if pressed
+  // E-Stop check - immediate stop and disable if pressed
   eStopCheck();
-
-  // convert target position into current position
-  resetPosition();
 
   updateMenuDisplay();
 
@@ -437,11 +425,11 @@ void loop()
   handleMenu();
   handleDirectButtons();
 
-  // FastAccelStepper runs in background ISR
+  // FastAccelStepper runs in background ISR; update state machines
   updateMotorMovement();
   updateHomingState();
 
-  // Auto-disable motor after hold time
+  // Auto-disable motor only if explicitly scheduled (e.g. shutdown)
   if (motorShouldDisable && millis() >= motorDisableTime)
   {
     disableMotor();
@@ -465,8 +453,8 @@ void loop()
     logBuffer.flush();
   }
 
-  // 1ms loop period for responsive control
-  delay(100);
+  // 1ms loop period for responsive control and high sensor polling repeatability
+  delay(1);
 }
 
 // ============================================================================
@@ -474,7 +462,10 @@ void loop()
 // ============================================================================
 void eStopCheck()
 {
-  if (readEStop() == HIGH)
+  static bool lastEStopState = false;
+  bool isEStopPressed = (readEStop() == HIGH);
+
+  if (isEStopPressed)
   {
     if (stepper)
       stepper->forceStop();
@@ -482,19 +473,30 @@ void eStopCheck()
     isTesting = false;
     homingState = HOMING_IDLE;
     disableMotor();
-    logSmart("E-STOP ACTIVATED - All movement stopped");
-    lcd.setCursor(0, 0);
-    lcd.print(F("E-STOP ACTIVE   "));
-    delay(100);
-    flag = false;
-    lcd.setCursor(0, 0);
-    lcd.print(F("                "));
+
+    if (!lastEStopState)
+    {
+      logSmart("E-STOP ACTIVATED - All movement stopped and motor disabled");
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(F("E-STOP ACTIVE   "));
+      lastEStopState = true;
+    }
+  }
+  else if (lastEStopState)
+  {
+    // Transition from active E-STOP to normal state
+    lastEStopState = false;
+    enableMotor();
+    currentPosition = getCurrentPosition();
+    motorTargetPosition = currentPosition;
+    logSmart("E-STOP RELEASED - Motor re-enabled at position: " + String(currentPosition));
+    updateMenuDisplay();
   }
 }
 
 // ============================================================================
 // MOTOR ENABLE / DISABLE
-// FIXED: Proper hold-time state management
 // ============================================================================
 void enableMotor()
 {
@@ -502,8 +504,6 @@ void enableMotor()
   {
     stepper->enableOutputs();
   }
-
-  // Clear any pending disable timer when actively enabling
   motorShouldDisable = false;
   motorDisableTime = 0;
 }
@@ -519,21 +519,22 @@ void disableMotor()
 
 void scheduleMotorDisable()
 {
+  // Kept for backward compatibility if explicitly needed
   motorDisableTime = millis() + MOTOR_HOLD_TIME;
   motorShouldDisable = true;
 }
 
 // ============================================================================
 // HOMING
-// INTERRUPT-DRIVEN HOMING WITH ISR-SAFE DEBOUNCING
-// FIXED: Debouncing moved outside ISR, uses millis() in main loop only
+// TWO-STAGE NON-BLOCKING STATE MACHINE
+// Sequence: Fast approach -> detect -> stop -> back off -> slow approach -> detect -> set 0
 // ============================================================================
 void findHomeDirection(int direction)
 {
-  int startPoint = int(STEPS_PER_REV/4);
-  startMotorMovement(startPoint*-1*direction);
-  delay(1000); 
-  setHomeDirection(direction);
+  if (direction == 1 || direction == -1)
+  {
+    setHomeDirection(direction);
+  }
   startFindHome();
 }
 
@@ -541,73 +542,160 @@ void startFindHome()
 {
   if (!stepper)
     return;
+  if (readEStop() == HIGH)
+    return;
 
-  Serial.println(F("Starting home search..."));
-  Serial.print(F("Moving in direction: "));
-  Serial.println(HOME_DIRECTION);
+  if (isMotorMoving || isTesting)
+  {
+    stepper->forceStop();
+    isMotorMoving = false;
+    isTesting = false;
+  }
 
   enableMotor();
-  stepper->setSpeedInHz((uint32_t)HOMING_SPEED / 2);
-  stepper->setAcceleration((uint32_t)ACCELERATION / 2);
-  stepper->move(HOME_DIRECTION * MAX_POSITION); // Configurable direction
-  homingState = HOMING_MOVING;
-  homingStartTime = millis();
+
+  // Check if sensor is already triggered
+  if (readHomeSwitch() == 1)
+  {
+    logSmart("Homing: Sensor active at start, backing away...");
+    stepper->setSpeedInHz((uint32_t)HOMING_SLOW_SPEED);
+    stepper->setAcceleration((uint32_t)ACCELERATION);
+    stepper->move(-HOME_DIRECTION * HOMING_BACKOFF_STEPS);
+    homingStartTime = millis();
+    homingState = HOMING_INITIAL_BACKOFF;
+  }
+  else
+  {
+    logSmart("Homing: Stage 1 fast approach...");
+    stepper->setSpeedInHz((uint32_t)HOMING_SPEED);
+    stepper->setAcceleration((uint32_t)ACCELERATION);
+    stepper->move(HOME_DIRECTION * MAX_POSITION);
+    homingStartTime = millis();
+    homingState = HOMING_STAGE1_FAST;
+  }
 }
 
 void updateHomingState()
 {
-  if (!stepper)
+  if (!stepper || homingState == HOMING_IDLE)
     return;
 
-  if (homingState == HOMING_MOVING)
+  // Timeout safety (60s)
+  if (millis() - homingStartTime > 60000)
   {
-    // Poll hall sensor with debouncing
-    static unsigned long lastTriggerTime = 0;
-    unsigned long now = millis();
-
-    if (readHomeSwitch() && now - lastTriggerTime > 50)
-    { // 50ms debounce
-      lastTriggerTime = now;
-
-      // Home switch detected!
-      stepper->forceStop();
-      delay(50); // Allow motion to settle
-
-      // NOTE: setCurrentPosition() only works reliably in standstill.
-      // The RMT module may have off-by-X steps in the current command.
-      // We stop first to minimize error.
-      stepper->setCurrentPosition(0);
-      currentPosition = 0;
-      preferences.putLong("currPos", currentPosition);
-
-      logSmart("Home switch detected!");
-      logSmart("Home found and set to position 0");
-      homingState = HOMING_DONE;
-      scheduleMotorDisable();
-      updateMenuDisplay();
-    }
-
-    // Timeout safety
-    if (millis() - homingStartTime > 60000)
-    {
-      stepper->forceStop();
-      logSmart("ERROR: Homing timeout (60s). Check switch connection and HOME_DIRECTION setting.");
-      homingState = HOMING_IDLE;
-      scheduleMotorDisable();
-      updateMenuDisplay();
-    }
+    stepper->forceStop();
+    logSmart("ERROR: Homing timeout (60s). Check switch connection and HOME_DIRECTION setting.");
+    homingState = HOMING_IDLE;
+    updateMenuDisplay();
+    return;
   }
 
-  if (homingState == HOMING_DONE)
+  switch (homingState)
   {
-    homingState = HOMING_IDLE;
+    case HOMING_INITIAL_BACKOFF:
+      if (!stepper->isRunning())
+      {
+        if (readHomeSwitch() == 1)
+        {
+          // Still active, back off further
+          stepper->move(-HOME_DIRECTION * HOMING_BACKOFF_STEPS);
+        }
+        else
+        {
+          logSmart("Homing: Switch cleared. Stage 1 fast approach...");
+          stepper->setSpeedInHz((uint32_t)HOMING_SPEED);
+          stepper->setAcceleration((uint32_t)ACCELERATION);
+          stepper->move(HOME_DIRECTION * MAX_POSITION);
+          homingState = HOMING_STAGE1_FAST;
+        }
+      }
+      break;
+
+    case HOMING_STAGE1_FAST:
+      if (readHomeSwitch() == 1)
+      {
+        logSmart("Homing: Stage 1 switch detected, stopping...");
+        stepper->forceStop();
+        homingState = HOMING_STAGE1_STOPPING;
+      }
+      else if (!stepper->isRunning())
+      {
+        logSmart("ERROR: Homing reached max travel without triggering switch.");
+        homingState = HOMING_IDLE;
+        updateMenuDisplay();
+      }
+      break;
+
+    case HOMING_STAGE1_STOPPING:
+      if (!stepper->isRunning())
+      {
+        logSmart("Homing: Backing off for precision touch...");
+        stepper->setSpeedInHz((uint32_t)HOMING_SLOW_SPEED);
+        stepper->setAcceleration((uint32_t)ACCELERATION);
+        stepper->move(-HOME_DIRECTION * HOMING_BACKOFF_STEPS);
+        homingState = HOMING_BACKOFF;
+      }
+      break;
+
+    case HOMING_BACKOFF:
+      if (!stepper->isRunning())
+      {
+        if (readHomeSwitch() == 1)
+        {
+          // Still active, back off further
+          stepper->move(-HOME_DIRECTION * HOMING_BACKOFF_STEPS);
+        }
+        else
+        {
+          logSmart("Homing: Stage 2 slow precision approach...");
+          stepper->setSpeedInHz((uint32_t)HOMING_SLOW_SPEED);
+          stepper->setAcceleration((uint32_t)ACCELERATION);
+          stepper->move(HOME_DIRECTION * (HOMING_BACKOFF_STEPS * 2));
+          homingState = HOMING_STAGE2_SLOW;
+        }
+      }
+      break;
+
+    case HOMING_STAGE2_SLOW:
+      if (readHomeSwitch() == 1)
+      {
+        stepper->forceStop();
+        homingState = HOMING_STAGE2_STOPPING;
+      }
+      else if (!stepper->isRunning())
+      {
+        logSmart("ERROR: Stage 2 slow approach missed switch.");
+        homingState = HOMING_IDLE;
+        updateMenuDisplay();
+      }
+      break;
+
+    case HOMING_STAGE2_STOPPING:
+      if (!stepper->isRunning())
+      {
+        stepper->setCurrentPosition(0);
+        currentPosition = 0;
+        preferences.putLong("currPos", currentPosition);
+
+        logSmart("Home switch detected!");
+        logSmart("Home found and calibrated to position 0");
+        homingState = HOMING_DONE;
+        updateMenuDisplay();
+      }
+      break;
+
+    case HOMING_DONE:
+      homingState = HOMING_IDLE;
+      break;
+
+    default:
+      homingState = HOMING_IDLE;
+      break;
   }
 }
-
 // ============================================================================
 // SERIAL INPUT
 // NON-BLOCKING SERIAL INPUT HANDLER
-// FIXED: Character-by-character parsing instead of blocking readStringUntil()
 // ============================================================================
 void handleSerialInput()
 {
@@ -652,7 +740,7 @@ void processCommand(String command)
     long steps = command.substring(6).toInt();
     if (steps > 0 && steps <= MAX_JOG_STEPS)
     {
-      startMotorMovement(currentPosition + steps);
+      startMotorMovement(getCurrentPosition() + steps);
       logSmart("Jogging forward");
     }
     else
@@ -665,7 +753,7 @@ void processCommand(String command)
     long steps = command.substring(6).toInt();
     if (steps > 0 && steps <= MAX_JOG_STEPS)
     {
-      startMotorMovement(currentPosition - steps);
+      startMotorMovement(getCurrentPosition() - steps);
       logSmart("Jogging backward");
     }
     else
@@ -710,7 +798,7 @@ void processCommand(String command)
   }
   else if (command == "FIND_HOME")
   {
-    findHomeDirection(1);
+    startFindHome();
   }
   else if (command.startsWith("TEST "))
   {
@@ -762,10 +850,12 @@ void processCommand(String command)
   }
   else if (command == "GET_SWITCH")
   {
-    int switchState = digitalRead(HOME_SWITCH_PIN);
+    int switchState = readHomeSwitch();
+    int rawAnalog = analogRead(HOME_SWITCH_PIN);
     Serial.print(F("Home limit switch status: "));
-    Serial.println((switchState == LOW) ? F("TRIGGERED") : F("NOT TRIGGERED"));
-    digitalWrite(LED_HOME_PIN, (switchState == LOW) ? HIGH : LOW); // Optional: LED indication
+    Serial.println((switchState == 1) ? F("TRIGGERED") : F("NOT TRIGGERED"));
+    Serial.print(F("Home switch ADC reading: "));
+    Serial.println(rawAnalog);
   }
   else if (command == "HELP")
   {
@@ -782,12 +872,12 @@ void processCommand(String command)
 // ============================================================================
 void motorInfo()
 {
-  Serial.println("=========================================================");
-  Serial.println(F("\nMotor Configuration:"));
+  Serial.println(F("========================================================="));
+  Serial.println(F("Motor Configuration:"));
   Serial.print(F("- Home position: "));
   Serial.println(homePosition);
   Serial.print(F("- Current position: "));
-  Serial.println(currentPosition);
+  Serial.println(getCurrentPosition());
   Serial.print(F("- Steps per revolution: "));
   Serial.println(STEPS_PER_REV);
   Serial.print(F("- Max speed (steps/sec): "));
@@ -810,35 +900,35 @@ void motorInfo()
     Serial.println(savedPositions[i]);
   }
   Serial.println();
-  Serial.println("=========================================================");
+  Serial.println(F("========================================================="));
 }
 
 void help()
 {
-  Serial.println("=========================================================");
-  Serial.println("<<<<<  Serial Commands  >>>>>");
-  Serial.println("- JOG F <steps>: Jog forward (clockwise) by <steps> steps");
-  Serial.println("- JOG B <steps>: Jog backward (counterclockwise) by <steps> steps");
-  Serial.println("- MOVE_TO <position>: Move to absolute position <position>");
-  Serial.println("- HOME: Move to home position (0)");
-  Serial.println("- RESET_HOME: Set current position as new home");
-  Serial.println("- SAVE_POS <num>: Save current position to slot <num> (0-4)");
-  Serial.println("- LOAD_POS <num>: Load position from slot <num>");
-  Serial.println("- GET_POS: Print current position");
-  Serial.println("- FIND_HOME: Find home using limit switch (non-blocking)");
-  Serial.println("- TEST <steps>: Start continuous test with <steps> steps");
-  Serial.println("- STOP: Stop the test");
-  Serial.println("- SET_STEPS <value>: Set steps per revolution and save to memory");
-  Serial.println("- SET_MAX_SPEED <value>: Set maximum speed and save to memory (0 < value <= 50000)");
-  Serial.println("- SET_ACCELERATION <value>: Set acceleration and save to memory (0 < value <= 50000)");
-  Serial.println("- SET_HOLD_TIME <ms>: Set motor hold time after move (0-10000 ms)");
-  Serial.println("- SET_SPEED <value>: Set homing speed and save to memory (0 < value <= 50000)");
-  Serial.println("- SET_HOME_DIR <dir>: Set homing direction (-1 or +1) and save to memory");
-  Serial.println("- GET_INFO: Display motor configuration (steps, speed, acceleration, hold time)");
-  Serial.println("- GET_SWITCH: Read home limit switch status");
-  Serial.println("- SET_POS <steps>: Override current position tracking to <steps> without moving motor");
-  Serial.println("- HELP: Shows all the Serial Commands");
-  Serial.println("=========================================================");
+  Serial.println(F("========================================================="));
+  Serial.println(F("<<<<<  Serial Commands  >>>>>"));
+  Serial.println(F("- JOG F <steps>: Jog forward (clockwise) by <steps> steps"));
+  Serial.println(F("- JOG B <steps>: Jog backward (counterclockwise) by <steps> steps"));
+  Serial.println(F("- MOVE_TO <position>: Move to absolute position <position>"));
+  Serial.println(F("- HOME: Move to home position (0)"));
+  Serial.println(F("- RESET_HOME: Set current position as new home"));
+  Serial.println(F("- SAVE_POS <num>: Save current position to slot <num> (0-4)"));
+  Serial.println(F("- LOAD_POS <num>: Load position from slot <num> (0-4)"));
+  Serial.println(F("- GET_POS: Print current position"));
+  Serial.println(F("- FIND_HOME: Find home using limit switch (two-stage non-blocking)"));
+  Serial.println(F("- TEST <steps>: Start continuous test with <steps> steps"));
+  Serial.println(F("- STOP: Stop continuous test"));
+  Serial.println(F("- SET_STEPS <value>: Set steps per revolution and save to memory"));
+  Serial.println(F("- SET_MAX_SPEED <value>: Set maximum speed and save to memory (0 < value <= 50000)"));
+  Serial.println(F("- SET_ACCELERATION <value>: Set acceleration and save to memory (0 < value <= 50000)"));
+  Serial.println(F("- SET_HOLD_TIME <ms>: Set motor hold time after move (0-10000 ms)"));
+  Serial.println(F("- SET_SPEED <value>: Set homing speed and save to memory (0 < value <= 50000)"));
+  Serial.println(F("- SET_HOME_DIR <dir>: Set homing direction (-1 or +1) and save to memory"));
+  Serial.println(F("- GET_INFO: Display motor configuration (steps, speed, acceleration, hold time)"));
+  Serial.println(F("- GET_SWITCH: Read home limit switch status"));
+  Serial.println(F("- SET_POS <steps>: Override current position tracking to <steps> without moving motor"));
+  Serial.println(F("- HELP: Shows all the Serial Commands"));
+  Serial.println(F("========================================================="));
 }
 
 // ============================================================================
@@ -848,22 +938,23 @@ void startMotorMovement(long targetPos)
 {
   if (!stepper)
     return;
-  if (readEStop())
+  if (readEStop() == HIGH)
     return;
-  if (isMotorMoving)
+  if (isMotorMoving || homingState != HOMING_IDLE)
   {
-    logSmart("Motor already moving, ignoring command");
+    logSmart("Motor busy, ignoring command");
     return;
   }
 
-  targetPos = constrain(targetPos, -MAX_POSITION, MAX_POSITION);
-
   enableMotor();
-  delay(50);
+  targetPos = constrain(targetPos, -MAX_POSITION, MAX_POSITION);
   motorTargetPosition = targetPos;
+
   stepper->setSpeedInHz((uint32_t)MAX_SPEED);
   stepper->setAcceleration((uint32_t)ACCELERATION);
+
   stepper->moveTo(targetPos);
+
   isMotorMoving = true;
   motorMoveStartTime = millis();
 }
@@ -881,7 +972,7 @@ void updateMotorMovement()
 
     logSmart("Movement complete. Position: " + String(currentPosition));
     updateMenuDisplay();
-    scheduleMotorDisable();
+    // Motor remains energized between movements for holding torque and repeatability
   }
 }
 
@@ -890,6 +981,7 @@ void updateMotorMovement()
 // ============================================================================
 void saveCurrentPosition()
 {
+  currentPosition = getCurrentPosition();
   preferences.putLong("currPos", currentPosition);
   preferences.putLong("homePos", homePosition);
   logSmart("Current position saved: " + String(currentPosition));
@@ -899,6 +991,7 @@ void savePositionToSlot(int num)
 {
   if (num >= 0 && num < 5)
   {
+    currentPosition = getCurrentPosition();
     savedPositions[num] = currentPosition;
     preferences.putLong(("pos" + String(num)).c_str(), currentPosition);
     logSmart("Position saved to slot " + String(num) + ": " + String(currentPosition));
@@ -913,11 +1006,11 @@ void loadPositionFromSlot(int num)
 {
   if (num >= 0 && num < 5)
   {
-    long targetPos = savedPositions[num];
-    logSmart("Loading position from slot " + String(num) + ": " + String(targetPos));
-    if (currentPosition != targetPos)
+    long targetSlot = savedPositions[num];
+    logSmart("Loading position from slot " + String(num) + ": " + String(targetSlot));
+    if (getCurrentPosition() != targetSlot)
     {
-      startMotorMovement(targetPos);
+      startMotorMovement(targetSlot);
     }
     else
     {
@@ -932,7 +1025,7 @@ void loadPositionFromSlot(int num)
 
 void moveToPosition(long targetPosition)
 {
-  if (abs(targetPosition - currentPosition) < 1)
+  if (abs(targetPosition - getCurrentPosition()) < 1)
   {
     logSmart("Already at target position");
     return;
@@ -942,7 +1035,7 @@ void moveToPosition(long targetPosition)
 
 void home()
 {
-  logSmart("Homing to position 0...");
+  logSmart("Moving to position 0...");
   startMotorMovement(0);
 }
 
@@ -950,36 +1043,15 @@ void resetHome()
 {
   if (!stepper)
     return;
-  homePosition = currentPosition;
+  homePosition = getCurrentPosition();
   currentPosition = 0;
   stepper->setCurrentPosition(0);
   preferences.putLong("homePos", homePosition);
   preferences.putLong("currPos", currentPosition);
-  logSmart("Home reset. New home offset: " + String(homePosition));
-
-  logSmart("Current position set to 0");
+  logSmart("Home reset. Current position calibrated to 0");
   updateMenuDisplay();
 }
 
-void resetPosition()
-{
-  if (isMotorMoving)
-  {
-    return;
-  }
-  if (flag && readEStop() == LOW)
-  {
-    delay(100);
-    setPositionWithoutMoving(targetPos);
-    flag = false;
-  }
-  else
-  {
-    return;
-  }
-}
-
-// FIXED: Always refresh from stepper for accurate reading
 long getCurrentPosition()
 {
   if (stepper)
@@ -1110,7 +1182,7 @@ void startTestAccel(long steps)
     testSteps = steps;
     testDirection = true;
     isTesting = true;
-    lastTestTime = micros(); // Initialize non-blocking timer
+    lastTestTime = micros();
     logSmart("Starting test with " + String(testSteps) + " steps");
     logSmart("Test pattern: Forward -> Home -> repeat");
   }
@@ -1128,9 +1200,9 @@ void stopTestAccel()
   }
   isTesting = false;
   isMotorMoving = false;
+  currentPosition = getCurrentPosition();
 
-  logSmart("Test stopped");
-  scheduleMotorDisable();
+  logSmart("Test stopped at position: " + String(currentPosition));
 }
 
 void runTestAccel()
@@ -1148,119 +1220,104 @@ void runTestAccel()
 
 // ============================================================================
 // DIRECT BUTTON HANDLER
-// FIXED: Jog movement uses saved position as reference, not current position
-// - If current position matches saved position, no movement occurs
-// - Movement calculated based on shortest path considering full rotation
+// Accurately calculates target absolute position for rotational moves (CW / CCW)
 // ============================================================================
-long calculateGoToSavedPosition(long currentPos, long targetPos, long STEPS_PER_REV, String direction)
+long calculateGoToSavedPosition(long currentPos, long targetPos, long stepsPerRev, const String &direction)
 {
-  if (currentPos == targetPos)
-  {
-    if (direction == "CW")
-    {
-      return currentPos + STEPS_PER_REV;
-    }
-    else
-    {
-      return currentPos - STEPS_PER_REV;
-    }
-  }
+  if (stepsPerRev <= 0)
+    stepsPerRev = 12800;
 
-  if ((direction == "CCW" && targetPos < currentPos))
-  {
-    return targetPos;
-  }
-  if (direction == "CW" && targetPos > currentPos)
-  {
-    return targetPos;
-  }
+  // Normalize positions to [0, stepsPerRev)
+  long normCurrent = currentPos % stepsPerRev;
+  if (normCurrent < 0)
+    normCurrent += stepsPerRev;
+
+  long normTarget = targetPos % stepsPerRev;
+  if (normTarget < 0)
+    normTarget += stepsPerRev;
+
   if (direction == "CW")
   {
-    return (targetPos + STEPS_PER_REV);
+    long delta = normTarget - normCurrent;
+    if (delta <= 0)
+      delta += stepsPerRev;
+    return currentPos + delta;
   }
-  else
+  else // CCW
   {
-    return (targetPos - STEPS_PER_REV);
+    long delta = normTarget - normCurrent;
+    if (delta >= 0)
+      delta -= stepsPerRev;
+    return currentPos + delta;
   }
 }
 
 void handleDirectButtons()
 {
-  // static int lastDirectKey = 0;
   static unsigned long lastDirectKeyTime = 0;
-  String commandTemp = "";
   unsigned long currentTime = millis();
 
   // Position selection (GPIO34)
   int posKey = readDirectKeypad();
-  if (posKey != lastDirectKey && currentTime - lastDirectKeyTime > debounceDelay)
+  if (posKey != lastDirectKey && (currentTime - lastDirectKeyTime > debounceDelay))
   {
     lastDirectKey = posKey;
     lastDirectKeyTime = currentTime;
 
     if (posKey >= 1 && posKey <= 5)
-    { // Buttons 2-5 -> slots 0-3
+    { // Buttons 1-5 -> slots 0-4
       selectedPositionIndex = posKey - 1;
-      logSmart("Position slot " + String(posKey));
+      logSmart("Position slot " + String(selectedPositionIndex) + " selected (Saved Pos: " + String(savedPositions[selectedPositionIndex]) + ")");
     }
     else if (posKey == 6 || posKey == 7)
-    { // CW jog - move towards saved position
-      bool direction = true;
-      String dir = "CW";
-      if (posKey == 6)
+    { // Button 6 = CCW, Button 7 = CW
+      if (selectedPositionIndex < 0 || selectedPositionIndex >= 5)
       {
-        direction = false; // CW = button 6, CCW = button 7
-        dir = "CCW";
+        logSmart("ERROR: Select a position first (buttons 1-5)");
+        return;
       }
-      // Get current position and target from selected slot
+
+      String dir = (posKey == 6) ? "CCW" : "CW";
       long currentPos = getCurrentPosition();
-      targetPos = savedPositions[selectedPositionIndex];
+      long targetSlotPos = savedPositions[selectedPositionIndex];
 
-      // Calculate shortest path to target considering full rotation
-      long moveSteps = calculateGoToSavedPosition(currentPos, targetPos, STEPS_PER_REV, dir);
+      // Calculate absolute target position to move in the desired rotational direction
+      long absoluteTarget = calculateGoToSavedPosition(currentPos, targetSlotPos, STEPS_PER_REV, dir);
 
-      logSmart("Going to saved position " + String(selectedPositionIndex) + ": " + String(targetPos) + " : " + String(moveSteps) + " D: " + dir);
-      startMotorMovement(moveSteps);
-
-      flag = true; // Set flag to update position after jog completes
+      logSmart("Going to slot " + String(selectedPositionIndex) + " (" + String(targetSlotPos) + ") moving " + dir + " -> Target Pos: " + String(absoluteTarget));
+      startMotorMovement(absoluteTarget);
     }
   }
 
   updateMenuDisplay();
 }
 
-// Calculate jog steps to reach target position
-// Returns 0 if already at target, otherwise returns shortest path
 long calculateJogToPosition(long currentPos, long targetPos, long fullRotation, bool rotationDirection)
 {
-  // If already at target, no movement needed
-  if (currentPos == targetPos)
-  {
-    return 0;
-  }
+  if (fullRotation <= 0)
+    fullRotation = STEPS_PER_REV;
 
-  long stepsToJog = targetPos - currentPos;
-  Serial.print(">> 1 Initial steps to jog: " + String(stepsToJog));
-  if (rotationDirection)
-  {
-    // Clockwise (CW) direction has to return positive
-    if (stepsToJog < 0)
-    {
-      stepsToJog = currentPos - fullRotation - targetPos; // Wrap around for CW
-    }
-    Serial.print(">> 2 Returned " + String(stepsToJog));
+  long normCurrent = currentPos % fullRotation;
+  if (normCurrent < 0)
+    normCurrent += fullRotation;
 
-    return abs(stepsToJog);
-  }
-  else
+  long normTarget = targetPos % fullRotation;
+  if (normTarget < 0)
+    normTarget += fullRotation;
+
+  if (rotationDirection) // CW
   {
-    // Counter-clockwise (CCW) direction has to return positive
-    if (stepsToJog > 0)
-    {
-      stepsToJog = abs(fullRotation - targetPos + currentPos); // Wrap around for CCW
-    }
-    Serial.print(">> 2 Returned " + String(stepsToJog));
-    return -abs(stepsToJog); // Negative for CCW direction
+    long delta = normTarget - normCurrent;
+    if (delta <= 0)
+      delta += fullRotation;
+    return delta;
+  }
+  else // CCW
+  {
+    long delta = normTarget - normCurrent;
+    if (delta >= 0)
+      delta -= fullRotation;
+    return delta;
   }
 }
 
@@ -1273,14 +1330,12 @@ int readKeypad()
   static int index = 0;
 
   int currentReadingK = analogRead(KEYPAD_PIN);
-  // Serial.println(currentReadingK);
   readingsK[index] = currentReadingK;
   index = (index + 1) % 3;
 
   int sum = readingsK[0] + readingsK[1] + readingsK[2];
   int avgValue = sum / 3;
 
-  // Calculate standard deviation
   float variance = 0;
   for (int i = 0; i < 3; i++)
   {
@@ -1292,7 +1347,6 @@ int readKeypad()
   int key = 0;
   if (stdDev < 50)
   {
-    // Use named constants for threshold values
     if (avgValue < KEYPAD_THRESHOLD_1)
       key = 1;
     else if (avgValue < KEYPAD_THRESHOLD_2)
@@ -1314,14 +1368,12 @@ int readDirectKeypad()
   static int index = 0;
 
   int currentReading = analogRead(DIRECT_KEYPAD_PIN);
-  // Serial.println(currentReading);
   readingsD[index] = currentReading;
   index = (index + 1) % 3;
 
   int sum = readingsD[0] + readingsD[1] + readingsD[2];
   int avgValue = sum / 3;
 
-  // Calculate standard deviation
   float variance = 0;
   for (int i = 0; i < 3; i++)
   {
@@ -1333,7 +1385,6 @@ int readDirectKeypad()
   int key = 0;
   if (stdDev < 50)
   {
-    // Use named constants for threshold values
     if (avgValue < DIRECT_KEYPAD_THRESHOLD_1)
       key = 1;
     else if (avgValue < DIRECT_KEYPAD_THRESHOLD_2)
@@ -1355,33 +1406,18 @@ int readDirectKeypad()
 
 int readHomeSwitch()
 {
-  static int readingsH[3] = {0, 0, 0};
+  static int readingsH[4] = {4095, 4095, 4095, 4095};
   static int index = 0;
 
   int currentReadingH = analogRead(HOME_SWITCH_PIN);
-  // Serial.println(currentReadingH);
   readingsH[index] = currentReadingH;
-  index = (index + 1) % 3;
+  index = (index + 1) & 3;
 
-  int sum = readingsH[0] + readingsH[1] + readingsH[2];
-  int avgValue = sum / 3;
+  int sum = readingsH[0] + readingsH[1] + readingsH[2] + readingsH[3];
+  int avgValue = sum >> 2;
 
-  // Calculate standard deviation
-  float variance = 0;
-  for (int i = 0; i < 3; i++)
-  {
-    variance += pow(readingsH[i] - avgValue, 2);
-  }
-  variance /= 3;
-  float stdDev = sqrt(variance);
-
-  int triggered = 0;
-  if (stdDev < 50)
-  {
-    // Use named constant for threshold value
-    if (avgValue < HOME_SWITCH_THRESHOLD)
-      triggered = 1;
-  }
+  int triggered = (avgValue < HOME_SWITCH_THRESHOLD) ? 1 : 0;
+  digitalWrite(LED_HOME_PIN, triggered ? HIGH : LOW);
 
   return triggered;
 }
@@ -1392,50 +1428,61 @@ int readHomeSwitch()
 void updateMenuDisplay()
 {
   long pos = getCurrentPosition(); // Always fresh from stepper
+  static HomingState lastHomingState = HOMING_IDLE;
   bool positionChanged = (pos != lastDisplayedPosition);
   bool menuStateChanged = (inSubMenu != lastMenuWasSubMenu) || (menuIndex != lastDisplayedIndex);
   bool selChanged = (selectedPositionIndex != lastSelectedPosIndex);
   bool moveChanged = (isMotorMoving != lastMotorState);
+  bool homingChanged = (homingState != lastHomingState);
   lastSelectedPosIndex = selectedPositionIndex;
   lastMotorState = isMotorMoving;
+  lastHomingState = homingState;
 
   // Skip refresh if nothing changed (saves I2C bus time)
-  if (!positionChanged && !menuStateChanged && !selChanged && !moveChanged && !inSubMenu)
+  if (!positionChanged && !menuStateChanged && !selChanged && !moveChanged && !homingChanged && !inSubMenu)
   {
     return;
   }
 
-  // LCD: Main menu
   lcd.clear();
 
-  // PRIORITY 1: Show direct button state prominently
-  if (selectedPositionIndex >= 0)
+  // PRIORITY 1: If homing, show homing status prominently
+  if (homingState != HOMING_IDLE)
   {
-    // Slot selected via direct button - show prominently
     lcd.setCursor(0, 0);
-    lcd.print(F("Sel "));
-    lcd.print(selectedPositionIndex);
+    lcd.print(F("** HOMING... ** "));
+    lcd.setCursor(0, 1);
+    String posStr = "Pos: " + String(pos);
+    if (posStr.length() > 16)
+      posStr = posStr.substring(0, 16);
+    lcd.print(posStr);
+
+    lastDisplayedPosition = pos;
+    lastMenuWasSubMenu = inSubMenu;
+    lastDisplayedIndex = menuIndex;
+    return;
+  }
+
+  // PRIORITY 2: Show direct button state prominently
+  if (selectedPositionIndex >= 0 && selectedPositionIndex < 5)
+  {
+    lcd.setCursor(0, 0);
+    lcd.print(F("Pos "));
+    lcd.print(selectedPositionIndex+1);
     lcd.print(F("="));
 
-    // Show saved position for this slot
     String slotPosStr = String(savedPositions[selectedPositionIndex]);
     if (slotPosStr.length() > 10)
       slotPosStr = slotPosStr.substring(0, 10);
     lcd.print(slotPosStr);
 
-    // Row 1: Show motor state / ready to load
     lcd.setCursor(0, 1);
     if (isMotorMoving)
     {
       lcd.print(F("Moving..."));
     }
-    else if (homingState != HOMING_IDLE)
-    {
-      lcd.print(F("Homing..."));
-    }
     else
     {
-      // Show current position
       String curPosStr = String(pos);
       if (curPosStr.length() > 16)
         curPosStr = curPosStr.substring(0, 16);
@@ -1469,59 +1516,59 @@ void updateMenuDisplay()
   {
     switch (subMenuType)
     {
-    case GOTO_SAVED:
-      lcd.setCursor(0, 0);
-      lcd.print(F("Goto saved:"));
-      lcd.setCursor(0, 1);
-      lcd.print(inputValue);
-      break;
+      case GOTO_SAVED:
+        lcd.setCursor(0, 0);
+        lcd.print(F("Goto saved:"));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
+        break;
 
-    case SPEED:
-      lcd.setCursor(0, 0);
-      lcd.print(F("Speed:    "));
-      lcd.setCursor(0, 1);
-      lcd.print(inputValue);
-      break;
+      case SPEED:
+        lcd.setCursor(0, 0);
+        lcd.print(F("Speed:    "));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
+        break;
 
-    case ACCEL:
-      lcd.setCursor(0, 0);
-      lcd.print(F("Accel:    "));
-      lcd.setCursor(0, 1);
-      lcd.print(inputValue);
-      break;
+      case ACCEL:
+        lcd.setCursor(0, 0);
+        lcd.print(F("Accel:    "));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
+        break;
 
-    case RESET_HOME:
-    case CONFIRM_RESET_HOME:
-      lcd.setCursor(0, 0);
-      lcd.print(F("Reset home?"));
-      lcd.setCursor(0, 1);
-      lcd.print(inputDirection ? F("No") : F("Yes"));
-      break;
+      case RESET_HOME:
+      case CONFIRM_RESET_HOME:
+        lcd.setCursor(0, 0);
+        lcd.print(F("Reset home?"));
+        lcd.setCursor(0, 1);
+        lcd.print(inputDirection ? F("No") : F("Yes"));
+        break;
 
-    case SAVE_POS:
-    case CONFIRM_SAVE_POS:
-      lcd.setCursor(0, 0);
-      lcd.print(F("Save to slot:"));
-      lcd.setCursor(0, 1);
-      lcd.print(inputValue);
-      break;
+      case SAVE_POS:
+      case CONFIRM_SAVE_POS:
+        lcd.setCursor(0, 0);
+        lcd.print(F("Save to slot:"));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
+        break;
 
-    case GOTO:
-      lcd.setCursor(0, 0);
-      lcd.print(F("Go to pos:"));
-      lcd.setCursor(0, 1);
-      lcd.print(inputValue);
-      break;
+      case GOTO:
+        lcd.setCursor(0, 0);
+        lcd.print(F("Go to pos:"));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
+        break;
 
-    case JOG:
-      lcd.setCursor(0, 0);
-      lcd.print(F("Jog steps:"));
-      lcd.setCursor(0, 1);
-      lcd.print(inputValue);
-      break;
+      case JOG:
+        lcd.setCursor(0, 0);
+        lcd.print(F("Jog steps:"));
+        lcd.setCursor(0, 1);
+        lcd.print(inputValue);
+        break;
 
-    default:
-      break;
+      default:
+        break;
     }
   }
 
@@ -1539,39 +1586,39 @@ void enterSubMenu()
 
   switch (menuIndex)
   {
-  case 0:
-    subMenuType = GOTO_SAVED;
-    inputValue = 0;
-    break;
-  case 1:
-    subMenuType = SPEED;
-    inputValue = (long)MAX_SPEED;
-    break;
-  case 2:
-    subMenuType = ACCEL;
-    inputValue = (long)ACCELERATION;
-    break;
-  case 3:
-    home();
-    inSubMenu = false;
-    subMenuType = NONE;
-    break;
-  case 4:
-    subMenuType = CONFIRM_RESET_HOME;
-    inputDirection = true;
-    break;
-  case 5:
-    subMenuType = SAVE_POS;
-    inputValue = 0;
-    break;
-  case 6:
-    subMenuType = GOTO;
-    inputValue = currentPosition;
-    break;
-  case 7:
-    subMenuType = JOG;
-    inputValue = JOG_STEPS;
-    break;
+    case 0:
+      subMenuType = GOTO_SAVED;
+      inputValue = 0;
+      break;
+    case 1:
+      subMenuType = SPEED;
+      inputValue = (long)MAX_SPEED;
+      break;
+    case 2:
+      subMenuType = ACCEL;
+      inputValue = (long)ACCELERATION;
+      break;
+    case 3:
+      home();
+      inSubMenu = false;
+      subMenuType = NONE;
+      break;
+    case 4:
+      subMenuType = CONFIRM_RESET_HOME;
+      inputDirection = true;
+      break;
+    case 5:
+      subMenuType = SAVE_POS;
+      inputValue = 0;
+      break;
+    case 6:
+      subMenuType = GOTO;
+      inputValue = getCurrentPosition();
+      break;
+    case 7:
+      subMenuType = JOG;
+      inputValue = JOG_STEPS;
+      break;
   }
 
   updateMenuDisplay();
@@ -1581,38 +1628,38 @@ void executeMenuAction()
 {
   switch (subMenuType)
   {
-  case GOTO_SAVED:
-    loadPositionFromSlot((int)inputValue);
-    break;
+    case GOTO_SAVED:
+      loadPositionFromSlot((int)inputValue);
+      break;
 
-  case SPEED:
-    setMaxSpeed((float)inputValue);
-    break;
+    case SPEED:
+      setMaxSpeed((float)inputValue);
+      break;
 
-  case ACCEL:
-    setAcceleration((float)inputValue);
-    break;
+    case ACCEL:
+      setAcceleration((float)inputValue);
+      break;
 
-  case CONFIRM_RESET_HOME:
-    if (!inputDirection)
-      resetHome();
-    break;
+    case CONFIRM_RESET_HOME:
+      if (!inputDirection)
+        resetHome();
+      break;
 
-  case SAVE_POS:
-  case CONFIRM_SAVE_POS:
-    savePositionToSlot((int)inputValue);
-    break;
+    case SAVE_POS:
+    case CONFIRM_SAVE_POS:
+      savePositionToSlot((int)inputValue);
+      break;
 
-  case GOTO:
-    moveToPosition(inputValue);
-    break;
+    case GOTO:
+      moveToPosition(inputValue);
+      break;
 
-  case JOG:
-    JOG_STEPS = inputValue;
-    break;
+    case JOG:
+      JOG_STEPS = inputValue;
+      break;
 
-  default:
-    break;
+    default:
+      break;
   }
 
   inSubMenu = false;
@@ -1625,7 +1672,7 @@ void handleMenu()
   int key = readKeypad();
   unsigned long currentTime = millis();
 
-  if (key != lastKey && currentTime - lastKeyTime > debounceDelay)
+  if (key != lastKey && (currentTime - lastKeyTime > debounceDelay))
   {
     lastKey = key;
     lastKeyTime = currentTime;
@@ -1660,36 +1707,36 @@ void handleMenu()
       {
         switch (subMenuType)
         {
-        case GOTO_SAVED:
-        case SAVE_POS:
-        case CONFIRM_SAVE_POS:
-          if (key == 1 && inputValue > 0)
-            inputValue--;
-          if (key == 2 && inputValue < 4)
-            inputValue++;
-          break;
+          case GOTO_SAVED:
+          case SAVE_POS:
+          case CONFIRM_SAVE_POS:
+            if (key == 1 && inputValue > 0)
+              inputValue--;
+            if (key == 2 && inputValue < 4)
+              inputValue++;
+            break;
 
-        case SPEED:
-        case ACCEL:
-        case GOTO:
-        case JOG:
-          if (key == 1)
-            inputValue -= 10;
-          if (key == 2)
-            inputValue += 10;
-          if (key == 3)
-            inputValue -= 100;
-          if (key == 4)
-            inputValue += 100;
-          break;
+          case SPEED:
+          case ACCEL:
+          case GOTO:
+          case JOG:
+            if (key == 1)
+              inputValue -= 10;
+            if (key == 2)
+              inputValue += 10;
+            if (key == 3)
+              inputValue -= 100;
+            if (key == 4)
+              inputValue += 100;
+            break;
 
-        case CONFIRM_RESET_HOME:
-          if (key == 1 || key == 2)
-            inputDirection = !inputDirection;
-          break;
+          case CONFIRM_RESET_HOME:
+            if (key == 1 || key == 2)
+              inputDirection = !inputDirection;
+            break;
 
-        default:
-          break;
+          default:
+            break;
         }
       }
     }

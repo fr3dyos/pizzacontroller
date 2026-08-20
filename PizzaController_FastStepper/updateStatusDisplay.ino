@@ -5,7 +5,7 @@ void updateStatusDisplay() {
   lastStatusUpdate = millis();
 
   String line1 = "Ready Sel:";
-  if (selectedPositionIndex >= 0) {
+  if (selectedPositionIndex >= 0 && selectedPositionIndex < 5) {
     line1 += String(selectedPositionIndex);
   } else {
     line1 += "-";
