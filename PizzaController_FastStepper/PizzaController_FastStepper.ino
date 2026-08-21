@@ -1,4 +1,4 @@
-// PizzaController_FastAccelStepper.ino
+// PizzaController_FastStepper.ino
 // ESP32 Stepper Controller with DM556 Driver - PRODUCTION-READY VERSION
 // Hardware: ESP32, NEMA23 57HS56-1504A08-D21 (1.5A), DM556, 24V/5A PSU, 12800 steps/rev
 // Pins: STEP=18, DIR=19, ENABLE=21, HOME=27, ESTOP=33, LCD SDA=25 SCL=26
@@ -151,14 +151,14 @@ struct SerialLogBuffer
 // ============================================================================
 int STEPS_PER_REV = 12800;
 float MAX_SPEED = 1600.0;
-float ACCELERATION = 300.0;
+float ACCELERATION = 100.0 ;
 float HOMING_SPEED = 1600.0;
 const float HOMING_SLOW_SPEED = 200.0;
-const long HOMING_BACKOFF_STEPS = 1000;
+const long HOMING_BACKOFF_STEPS = 500;
 int JOG_STEPS = 50;
 int HOME_DIRECTION = 1; // 1 = move positive to find home
-int HYSTERESIS_POS_STEPS = 0; // CW compensation for one full revolution (scaled proportionally)
-int HYSTERESIS_NEG_STEPS = 0; // CCW compensation for one full revolution (scaled proportionally)
+int HYSTERESIS_POS_STEPS = 32; // CW compensation for one full revolution (scaled proportionally)
+int HYSTERESIS_NEG_STEPS = 90; // CCW compensation for one full revolution (scaled proportionally)
 int lastDirectKey = 0;   // For direct button state tracking
 
 const long MAX_JOG_STEPS = 50000;
@@ -1288,7 +1288,7 @@ void setPositionWithoutMoving(long newPos)
 // ============================================================================
 void startTestAccel(long steps)
 {
-  if (steps > 0 && steps <= MAX_POSITION)
+  if (abs(steps) <= MAX_POSITION)
   {
     testSteps = steps;
     testDirection = true;
