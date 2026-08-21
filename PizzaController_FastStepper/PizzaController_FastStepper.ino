@@ -157,8 +157,8 @@ const float HOMING_SLOW_SPEED = 200.0;
 const long HOMING_BACKOFF_STEPS = 1000;
 int JOG_STEPS = 50;
 int HOME_DIRECTION = 1; // 1 = move positive to find home
-int HYSTERESIS_POS_STEPS = 0; // Positive rotation (CW) compensation steps (X)
-int HYSTERESIS_NEG_STEPS = 0; // Negative rotation (CCW) compensation steps (Y)
+int HYSTERESIS_POS_STEPS = 0; // CW compensation for one full revolution (scaled proportionally)
+int HYSTERESIS_NEG_STEPS = 0; // CCW compensation for one full revolution (scaled proportionally)
 int lastDirectKey = 0;   // For direct button state tracking
 
 const long MAX_JOG_STEPS = 50000;
@@ -174,7 +174,7 @@ bool motorShouldDisable = false;
 // MOTOR STATE MANAGEMENT
 // ============================================================================
 bool isMotorMoving = false;
-long motorTargetPosition = 0;       // Target absolute motor position for active move
+long motorTargetPosition = 0;       // Logical position to report after active move completes
 unsigned long motorMoveStartTime = 0;
 
 HomingState homingState = HOMING_IDLE;
@@ -255,6 +255,7 @@ void handleSerialInput();
 void processCommand(String command);
 
 void startMotorMovement(long targetPos);
+void startMotorMovement(long physicalTargetPos, long logicalTargetPos);
 void updateMotorMovement();
 void disableMotor();
 void enableMotor();
@@ -964,6 +965,12 @@ void help()
 // ============================================================================
 void startMotorMovement(long targetPos)
 {
+  // Normal movement: physical and logical targets are the same.
+  startMotorMovement(targetPos, targetPos);
+}
+
+void startMotorMovement(long physicalTargetPos, long logicalTargetPos)
+{
   if (!stepper)
     return;
   if (readEStop() == HIGH)
@@ -975,37 +982,63 @@ void startMotorMovement(long targetPos)
   }
 
   enableMotor();
-  targetPos = constrain(targetPos, -MAX_POSITION, MAX_POSITION);
+
+  physicalTargetPos = constrain(physicalTargetPos, -MAX_POSITION, MAX_POSITION);
+  logicalTargetPos = constrain(logicalTargetPos, -MAX_POSITION, MAX_POSITION);
   long curPos = getCurrentPosition();
 
-  // If already at target, skip movement
-  if (targetPos == curPos)
+  // If the requested physical movement is zero, update the logical coordinate only.
+  if (physicalTargetPos == curPos)
   {
-    logSmart("Already at target position");
+    currentPosition = logicalTargetPos;
+    stepper->setCurrentPosition(currentPosition);
+    motorTargetPosition = currentPosition;
+    preferences.putLong("currPos", currentPosition);
+    logSmart("Already at target position. Logical position: " + String(currentPosition));
+    updateMenuDisplay();
     return;
   }
 
-  motorTargetPosition = targetPos; // Store nominal logical target
+  // The position that must be reported after the motor physically arrives.
+  // For normal moves this equals physicalTargetPos. For direct CW/CCW moves
+  // this is the selected saved position, while physicalTargetPos may be an
+  // unwrapped coordinate used only to force the requested rotation direction.
+  motorTargetPosition = logicalTargetPos;
 
-  // Apply directional hysteresis compensation (X steps for positive, Y steps for negative)
-  long physicalTarget = targetPos;
-  if (targetPos > curPos)
+  // Hysteresis compensation is proportional to the commanded rotation.
+  // A full revolution receives 100% of the configured hysteresis; half a
+  // revolution receives 50%, quarter revolution 25%, etc.
+  long movementSteps = labs(physicalTargetPos - curPos);
+  float rotationFraction = (STEPS_PER_REV > 0)
+                             ? ((float)movementSteps / (float)STEPS_PER_REV)
+                             : 0.0f;
+
+  long physicalTarget = physicalTargetPos;
+  long hysteresisComp = 0;
+
+  if (physicalTargetPos > curPos)
   {
-    physicalTarget += HYSTERESIS_POS_STEPS;
+    hysteresisComp = lroundf((float)HYSTERESIS_POS_STEPS * rotationFraction);
+    physicalTarget += hysteresisComp;
   }
-  else if (targetPos < curPos)
+  else if (physicalTargetPos < curPos)
   {
-    physicalTarget -= HYSTERESIS_NEG_STEPS;
+    hysteresisComp = lroundf((float)HYSTERESIS_NEG_STEPS * rotationFraction);
+    physicalTarget -= hysteresisComp;
   }
+
   physicalTarget = constrain(physicalTarget, -MAX_POSITION, MAX_POSITION);
 
   stepper->setSpeedInHz((uint32_t)MAX_SPEED);
   stepper->setAcceleration((uint32_t)ACCELERATION);
-
   stepper->moveTo(physicalTarget);
 
   isMotorMoving = true;
   motorMoveStartTime = millis();
+
+  logSmart("Move physical target: " + String(physicalTargetPos) +
+           ", logical target: " + String(logicalTargetPos) +
+           ", hysteresis: " + String(hysteresisComp) + " steps");
 }
 
 void updateMotorMovement()
@@ -1362,8 +1395,8 @@ void handleDirectButtons()
       // Calculate absolute target position to move in the desired rotational direction
       long absoluteTarget = calculateGoToSavedPosition(currentPos, targetSlotPos, STEPS_PER_REV, dir);
 
-      logSmart("Going to slot " + String(selectedPositionIndex) + " (" + String(targetSlotPos) + ") moving " + dir + " -> Target Pos: " + String(absoluteTarget));
-      startMotorMovement(absoluteTarget);
+      logSmart("Going to slot " + String(selectedPositionIndex) + " (" + String(targetSlotPos) + ") moving " + dir + " -> Physical Target: " + String(absoluteTarget) + ", Logical Target: " + String(targetSlotPos));
+      startMotorMovement(absoluteTarget, targetSlotPos);
     }
   }
 
