@@ -1,9 +1,10 @@
 // PizzaController_FastStepper.ino
 // ESP32 Stepper Controller with DM556 Driver - PRODUCTION-READY VERSION
-// Hardware: ESP32, NEMA23 57HS56-1504A08-D21 (1.5A), DM556, 24V/5A PSU, 12800 steps/rev
+// Hardware: ESP32, NEMA23 57HS56-1504A08-D21, DM556 (DIP set to 1/32 microstep / ~4.0A peak),
+//          24V/5A PSU, firmware default STEPS_PER_REV = 12800 (32x motor's natural 400 steps)
 // Pins: STEP=18, DIR=19, ENABLE=21, HOME=27, ESTOP=33, LCD SDA=25 SCL=26
 // Original Author: Eng. Fredy Osorio <ing.fredyosorio@gmail.com>
-// Optimized & Fixed Version: February 2026
+// Updated: August 2026
 
 // Serial Commands:
 // - JOG F <steps>: Jog forward (clockwise) by <steps> steps
@@ -55,8 +56,8 @@
 #define KEYPAD_PIN 35
 #define DIRECT_KEYPAD_PIN 34
 
-#define ESTOP_PIN 33    // Digital input, NC button (active LOW when closed to GND; HIGH when opened/pressed)
-#define LED_HOME_PIN 32 // Optional: onboard LED for home status indication
+#define ESTOP_PIN 33    // Digital input, INPUT_PULLUP. NC button to GND: HIGH when OK (button closed), LOW when E-Stop triggered (button opened or wire cut).
+#define LED_HOME_PIN 32 // Optional: onboard LED for home status indication (ADC1_CH4, used as digital output)
 
 // ============================================================================
 // DISPLAY OBJECTS
@@ -329,7 +330,9 @@ void logSmart(const String &msg)
 void setup()
 {
   pinMode(ENABLE_PIN, OUTPUT);
-  pinMode(HOME_SWITCH_PIN, INPUT_PULLUP);
+  // HOME_SWITCH_PIN is read via analogRead() with a 4-sample moving average (see readHomeSwitch()).
+  // Use plain INPUT (no pullup) so the analog threshold is well-defined.
+  pinMode(HOME_SWITCH_PIN, INPUT);
   pinMode(LED_HOME_PIN, OUTPUT);
   pinMode(ESTOP_PIN, INPUT_PULLUP);
 

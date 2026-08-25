@@ -1,6 +1,6 @@
 # PizzaController - NEMA23 Stepper Motor Controller with ESP32 and FastAccelStepper
 
-This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32-Wroom microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for smooth acceleration/deceleration and is configured for 1/8 microstepping to achieve both precise positioning and high speed control. It includes an LCD menu system for easy operation and has been optimized for better code maintenance.
+This project provides a complete Arduino sketch for controlling a NEMA23 stepper motor using an ESP32-Wroom microcontroller and a DM556 stepper driver. The program uses the FastAccelStepper library for smooth acceleration/deceleration and is configured for 1/32 microstepping (DM556 SW5–SW8 = OFF/OFF/ON/ON) to achieve both precise positioning and high speed control. The firmware default `STEPS_PER_REV = 12800` (32× the motor's natural 400 steps). It includes an LCD menu system for easy operation and has been optimized for better code maintenance.
 
 ## Hardware Requirements
 
@@ -91,11 +91,11 @@ Only one LCD is used by the firmware (address 0x27 on the default Wire bus). GPI
 
 ### DM556 DIP Switch Configuration
 
-The DM556 driver uses DIP switches to configure microstepping and other settings. For this project (1/8 microstepping), configure as follows:
+The DM556 driver uses DIP switches to configure microstepping and other settings. For this project (1/32 microstepping), configure as follows:
 
 #### Current
 
-NEMA23 Motor, 4.01A configuration:
+NEMA23 Motor, ~4.0A peak configuration:
 
 - **SW1 (MS1):** OFF
 - **SW2 (MS2):** ON
@@ -104,14 +104,14 @@ NEMA23 Motor, 4.01A configuration:
 
 #### Steps
 
-Configuration for pulses per revolution (default 1600 pulses/rev in hardware — firmware default `STEPS_PER_REV` is **3200**, i.e. the firmware compensates for 1/8 microstepping):
+Configuration for pulses per revolution (SW5–SW8 = OFF/OFF/ON/ON on a DM556 selects 1/32 microstep, 12800 pulses/rev). The firmware default `STEPS_PER_REV` is **12800** (32× the motor's natural 400 steps):
 
 - **SW5 (MS5):** OFF
 - **SW6 (MS6):** OFF
 - **SW7 (MS7):** ON
 - **SW8 (MS8):** ON
 
-> Note: the firmware defaults to `STEPS_PER_REV = 3200` (8× the motor's natural 400 steps because the DM556 is set to 1/8 microstepping). Change it at runtime with `SET_STEPS <value>` if your driver is set differently; the value is persisted in NVM.
+> Note: the firmware defaults to `STEPS_PER_REV = 12800` (32× the motor's natural 400 steps because the DM556 is set to 1/32 microstepping). Change it at runtime with `SET_STEPS <value>` if your driver is set differently (e.g. `SET_STEPS 3200` for 1/8 microstep); the value is persisted in NVM.
 
 ### Power Connections
 
@@ -139,12 +139,12 @@ Configuration for pulses per revolution (default 1600 pulses/rev in hardware —
 ## Configuration
 
 The program is configured for:
-- **Microstepping:** 1/8 (set by DM556 DIP switches)
-- **Steps per Revolution (firmware default):** 3200 — change at runtime with `SET_STEPS <value>` (saved to NVS)
+- **Microstepping:** 1/32 (set by DM556 DIP switches)
+- **Steps per Revolution (firmware default):** 12800 — change at runtime with `SET_STEPS <value>` (saved to NVS)
 - **Maximum Speed:** 8000 steps/sec — change with `SET_MAX_SPEED <value>` (saved to NVS, max 50000)
 - **Acceleration:** 4000 steps/sec² — change with `SET_ACCELERATION <value>` (saved to NVS, max 50000)
 - **Homing Speed:** 2000 steps/sec — change with `SET_SPEED <value>` (saved to NVS, max 50000)
-- **Motor Hold Time:** 300 ms after each move — change with `SET_HOLD_TIME <ms>` (saved to NVS, max 10000)
+- **Motor Hold Time:** 300 ms (deprecated — `SET_HOLD_TIME` is kept for NVM compatibility only and is no longer honored; the motor now holds position indefinitely between moves)
 - **Homing Direction:** -1 (negative) by default — change with `SET_HOME_DIR <-1|+1>` (saved to NVS)
 - **Saved Position Slots:** 5 slots persisted in NVS (`SAVE_POS <0-4>` / `LOAD_POS <0-4>`)
 
@@ -174,6 +174,8 @@ The program supports serial commands for remote control. Open Serial Monitor at 
 - `SET_HOLD_TIME <0-10000>`: Motor hold time ms after move (saves NVM)
 - `SET_SPEED <0-50000>`: Homing speed steps/sec (saves NVM)
 - `SET_HOME_DIR <-1|+1>`: Homing direction (saves NVM)
+- `SET_HYST_POS <0-50000>`: Positive-rotation hysteresis compensation steps (saves NVM)
+- `SET_HYST_NEG <0-50000>`: Negative-rotation hysteresis compensation steps (saves NVM)
 - `SET_POS <steps>`: Override current position tracking to `<steps>` without moving the motor (saves NVM)
 - `GET_INFO`: Show configuration and saved positions
 - `GET_SWITCH`: Read home switch status and update LED
@@ -194,11 +196,13 @@ Most parameters are exposed at runtime via Serial commands and persist in NVM (`
 | `SET_HOLD_TIME <ms>`| Motor hold time after each move                          |
 | `SET_SPEED <v>`    | Homing speed                                               |
 | `SET_HOME_DIR <d>` | Homing direction (-1 or +1)                                |
+| `SET_HYST_POS <v>` | Positive-rotation hysteresis compensation steps             |
+| `SET_HYST_NEG <v>` | Negative-rotation hysteresis compensation steps             |
 | `SET_POS <steps>`  | Override tracked position without moving the motor         |
 
 If you do want to recompile with different defaults, edit the constants at the top of the sketch:
 
-- `STEPS_PER_REV` — default steps per revolution (default 3200)
+- `STEPS_PER_REV` — default steps per revolution (default 12800)
 - `MAX_SPEED` — default max speed in steps/sec (default 8000)
 - `ACCELERATION` — default acceleration in steps/sec² (default 4000)
 - `HOMING_SPEED` — default homing speed in steps/sec (default 2000)
@@ -268,7 +272,7 @@ After the jog completes, the firmware uses `SET_POS` internally to update the tr
 3. Use the keypad to adjust the value (or toggle Yes/No)
 4. Press Select to execute and return to the main menu, or press Key 4 to cancel
 
-The firmware also runs a homing calibration on boot — `findHomeDirection(1)` is called once after the LCD splash so the controller starts each session from a known reference.
+The firmware does **not** auto-home on boot. The position read from NVM is restored as-is; run `FIND_HOME` (serial) or select the **Home** menu item and use the sensor to find the physical reference if you need a known position before operation.
 
 ## Author
 

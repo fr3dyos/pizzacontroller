@@ -11,7 +11,7 @@ Pin assignments for PizzaController based on current hardware configuration.
 | 21 | ENABLE | DM556 EN | Digital Out | Active LOW enable |
 | 25 | SDA | LCD I2C SDA | I2C1 | Address 0x27 |
 | 26 | SCL | LCD I2C SCL | I2C1 | Main menu |
-| 27 | HOME | A3144 Hall Sensor | Analog In | Threshold <1500, 3.3V |
+| 27 | HOME | A3144 Hall Sensor | Analog In (no pullup) | Threshold <1500, 3.3V; firmware reads via `analogRead()` with 4-sample moving average |
 | 32 | LED_HOME | Home Status LED | Digital Out | HIGH when home sensor is triggered (mirrors `GET_SWITCH`) |
 | 33 | ESTOP | Emergency Stop Button | Digital In | INPUT_PULLUP, active LOW, immediate stop |
 | 34 | DIRECT_BTN | 7-pos Direct Buttons | Analog In (ADC1_CH6) | Thresholds: 130/570/1170/1740/2370/3100/3700, Keys 1-5 = slots 0-4, keys 6/7 = CCW/CW jog |
@@ -28,7 +28,7 @@ Pin assignments for PizzaController based on current hardware configuration.
 | 3.3V | ESP32 | Hall VCC, Buttons VCC |
 | GND | Common | All components |
 
-## DM556 DIP Configuration (1/8 microstep, 1600ppr hardware / 3200 STEPS_PER_REV firmware, 4.01A)
+## DM556 DIP Configuration (1/32 microstep, 12800 STEPS_PER_REV firmware default, ~4.0A peak)
 
 | SW | Setting | Purpose |
 |----|---------|---------|
@@ -41,7 +41,9 @@ Pin assignments for PizzaController based on current hardware configuration.
 | 7  | ON  | Steps |
 | 8  | ON  | Steps |
 
-The firmware defaults `STEPS_PER_REV = 3200` (8× the motor's natural 400 steps). If you change the DIP switches, run `SET_STEPS <value>` to keep the firmware in sync — the value is saved to NVM.
+The firmware defaults `STEPS_PER_REV = 12800` (32× the motor's natural 400 steps; SW5–SW8 = OFF/OFF/ON/ON on a DM556 selects 1/32 microstep). If you change the DIP switches to a different microstep mode, run `SET_STEPS <value>` to keep the firmware in sync — the value is saved to NVM.
+
+For example, if you rewire to 1/8 microstep (SW5–SW8 = OFF/ON/ON/ON), set `STEPS_PER_REV = 3200` (8×400) and run `SET_STEPS 3200`.
 
 ## Motor Wiring (Permak 4-pin)
 
@@ -57,8 +59,8 @@ The firmware defaults `STEPS_PER_REV = 3200` (8× the motor's natural 400 steps)
 - **Analog Inputs:** GPIO 34/35/27 only (ADC1)
 - **No MS1/MS2/MS3 control:** DM556 DIP switches only
 - **GPIO 34/35:** Input-only (no pullup/down), perfect for analog buttons
-- **GPIO 27:** Analog for Hall threshold detection (<1500 = triggered)
-- **GPIO 32:** Digital output for home-status LED (not an input — GPIO 32 is on ADC2 and is used here as a digital output)
+- **GPIO 27:** Analog for Hall threshold detection (<1500 = triggered); pin is configured `INPUT` (no pullup)
+- **GPIO 32:** Digital output for home-status LED (ADC1_CH4, used here as a digital output)
 - **I2C:** GPIO 25/26 standard (Wire); one LCD at address 0x27
 - **No interrupts:** Hall polling with std-dev filter and 50 ms debounce
 

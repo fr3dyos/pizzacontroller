@@ -27,7 +27,7 @@ This guide helps diagnose and resolve common issues with PizzaController (ESP32,
    - Confirm firmware uses correct pins (18=STEP, 19=DIR) and FastAccelStepper initialized.
    - Quick test: LED + resistor STEP to GND to see pulses on `JOG F 100`.
 
-4. **DM556 DIP Switches (1/8 microstep, 4.01A, 1600ppr)**
+4. **DM556 DIP Switches (1/32 microstep, ~4.0A peak, 12800 pulses/rev)**
    ```
    Current: SW1 OFF, SW2 ON, SW3 OFF, SW4 ON
    Steps:   SW5 OFF, SW6 OFF, SW7 ON, SW8 ON
@@ -43,7 +43,7 @@ This guide helps diagnose and resolve common issues with PizzaController (ESP32,
      - Motor configuration block (steps, speed, accel, hold, home direction, saved positions)
      - `Serial Commands` help block
      - `System ready!`
-   - The sketch also runs a homing calibration on boot (`findHomeDirection(1)` after the splash) — if homing doesn't complete, check the home sensor and `HOME_DIRECTION`.
+   - The sketch does **not** auto-home on boot. To re-establish a known reference, run `FIND_HOME` (serial) or use the **Home** menu item — if homing doesn't complete, check the home sensor and `HOME_DIRECTION`.
    - No messages → check USB data cable, COM port, board selection.
 
 6. **Brown-out/Reset During Movement**
@@ -156,7 +156,7 @@ This guide helps diagnose and resolve common issues with PizzaController (ESP32,
 ## Overheating
 
 1. **Motor/Driver**
-   - DM556 4.01A may be high for some NEMA23; check motor rated current.
+   - DM556 ~4.0A peak may be high for some NEMA23 motors; check motor rated current and lower the DIP current (SW1–SW4) if it runs too hot.
    - Lower DIP current if too hot to touch (shouldn't burn hand seconds).
 
 2. **Operating Conditions**

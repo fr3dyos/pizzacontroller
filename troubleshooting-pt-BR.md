@@ -29,7 +29,7 @@ Siga os passos por categoria de problema, do mais simples para o mais provável.
    - Confirme que o firmware está usando os pinos corretos (18 = STEP, 19 = DIR) e que a FastAccelStepper está inicializada.  
    - Como teste rápido, pode-se colocar um LED + resistor entre STEP e GND para ver pulsos ao executar `JOG F 100`.
 
-4. **DIP switches do DM556 (1/8 microstep, 4,01 A, 1600 ppr)**
+4. **DIP switches do DM556 (1/32 microstep, ~4,0 A de pico, 12800 pulsos/rev)**
    ```md
    Corrente: SW1 OFF, SW2 ON, SW3 OFF, SW4 ON
    Steps:    SW5 OFF, SW6 OFF, SW7 ON,  SW8 ON
@@ -45,7 +45,7 @@ Siga os passos por categoria de problema, do mais simples para o mais provável.
      - Bloco de configuração do motor (steps, velocidade, acel, hold, direção de homing, posições salvas)  
      - Bloco de ajuda `Serial Commands`  
      - `System ready!`  
-   - O sketch também roda uma calibração de homing no boot (`findHomeDirection(1)` depois do splash) — se o homing não completar, confira o sensor de home e o `HOME_DIRECTION`.  
+   - O sketch **não** faz homing automaticamente no boot. Para restabelecer uma referência conhecida, execute `FIND_HOME` (serial) ou use o item de menu **Home** — se o homing não completar, confira o sensor de home e o `HOME_DIRECTION`.  
    - Se nada aparece, verifique cabo USB de dados, porta COM e seleção de placa no Arduino IDE.
 
 6. **Brown-out / reset ao tentar mover**
@@ -160,7 +160,7 @@ Siga os passos por categoria de problema, do mais simples para o mais provável.
 ## Aquecimento Excessivo
 
 1. **Motor e driver**
-   - Corrente configurada no DM556 (4,01 A) pode ser alta para alguns NEMA23; confira a corrente nominal do seu motor.  
+   - Corrente configurada no DM556 (~4,0 A de pico) pode ser alta para alguns NEMA23; confira a corrente nominal do seu motor e reduza a corrente via DIP (SW1–SW4) se aquecer demais.  
    - Reduza a corrente nos DIP switches se o motor ficar muito quente ao toque (não deve queimar a mão em poucos segundos).
 
 2. **Condições de operação**
