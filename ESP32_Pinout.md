@@ -14,7 +14,8 @@ Pin assignments for PizzaController based on current hardware configuration.
 | 27 | HOME | A3144 Hall Sensor | Analog In (no pullup) | Threshold <1500, 3.3V; firmware reads via `analogRead()` with 4-sample moving average |
 | 32 | LED_HOME | Home Status LED | Digital Out | HIGH when home sensor is triggered (mirrors `GET_SWITCH`) |
 | 33 | ESTOP | Emergency Stop Button | Digital In | INPUT_PULLUP, active LOW, immediate stop |
-| 34 | DIRECT_BTN | 7-pos Direct Buttons | Analog In (ADC1_CH6) | Thresholds: 130/570/1170/1740/2370/3100/3700, Keys 1-5 = slots 0-4, keys 6/7 = CCW/CW jog |
+| 34 | DIRECT_BTN | 5-pos Position Buttons | Analog In (ADC1_CH6) | Thresholds: 410/1229/2048/2867/3686 (0/20/40/60/80%), Keys 1-5 = slots 0-4 |
+| 36 | ROTATION_BTN | 2-pos Rotation Buttons | Analog In (ADC1_CH0) | Threshold: 2048 (50%), Key 1 = CCW, Key 2 = CW |
 | 35 | KEYPAD | Navigation Keypad | Analog In (ADC1_CH7) | Thresholds: 220/800/1400/2300/3600 |
 
 > GPIO 22 and GPIO 23 are **not driven** by the current sketch. Earlier drafts referenced a second I2C LCD (address 0x3F on Wire2) — that hardware is not part of this firmware build.
@@ -56,9 +57,9 @@ For example, if you rewire to 1/8 microstep (SW5–SW8 = OFF/ON/ON/ON), set `STE
 
 ## Capabilities & Restrictions
 
-- **Analog Inputs:** GPIO 34/35/27 only (ADC1)
+- **Analog Inputs:** GPIO 34/35/36/27 (ADC1)
 - **No MS1/MS2/MS3 control:** DM556 DIP switches only
-- **GPIO 34/35:** Input-only (no pullup/down), perfect for analog buttons
+- **GPIO 34/35/36:** Input-only (no pullup/down), perfect for analog buttons
 - **GPIO 27:** Analog for Hall threshold detection (<1500 = triggered); pin is configured `INPUT` (no pullup)
 - **GPIO 32:** Digital output for home-status LED (ADC1_CH4, used here as a digital output)
 - **I2C:** GPIO 25/26 standard (Wire); one LCD at address 0x27
@@ -69,7 +70,7 @@ For example, if you rewire to 1/8 microstep (SW5–SW8 = OFF/ON/ON/ON), set `STE
 - GPIO 0, 2, 4, 5 (general-purpose)
 - GPIO 22, 23 (available I2C pair / SPI / UART)
 - GPIO 16, 17 (UART2)
-- GPIO 33 (currently E-Stop; could be reassigned if E-Stop is moved)
+- GPIO 39 (ADC1_CH3, input-only, available)
 
 ## Verification Checklist
 
@@ -79,7 +80,9 @@ For example, if you rewire to 1/8 microstep (SW5–SW8 = OFF/ON/ON/ON), set `STE
 [X] GPIO 27 analog Hall 3.3V ✓
 [X] GPIO 32 → Home Status LED (digital output) ✓
 [X] GPIO 33 → E-Stop button (active LOW, INPUT_PULLUP) ✓
-[X] GPIO 34/35 analog buttons 3.3V ✓
+[X] GPIO 34 → Position buttons (5-pos, slots 0-4) 3.3V ✓
+[X] GPIO 35 → Navigation keypad 3.3V ✓
+[X] GPIO 36 → Rotation buttons (CCW/CW) 3.3V ✓
 [X] LM2596 5V → ESP32/LCD ✓
 [X] 24V 5A → DM556 ✓
 [X] DIP SW1-8 per table ✓

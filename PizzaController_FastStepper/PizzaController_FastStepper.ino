@@ -2,7 +2,7 @@
 // ESP32 Stepper Controller with DM556 Driver - PRODUCTION-READY VERSION
 // Hardware: ESP32, NEMA23 57HS56-1504A08-D21, DM556 (DIP set to 1/32 microstep / ~4.0A peak),
 //          24V/5A PSU, firmware default STEPS_PER_REV = 12800 (32x motor's natural 400 steps)
-// Pins: STEP=18, DIR=19, ENABLE=21, HOME=27, ESTOP=33, LCD SDA=25 SCL=26
+// Pins: STEP=18, DIR=19, ENABLE=21, HOME=27, ESTOP=33, LCD SDA=25 SCL=26, POS_BTN=34, ROT_BTN=36
 // Original Author: Eng. Fredy Osorio <ing.fredyosorio@gmail.com>
 // Updated: August 2026
 
@@ -54,7 +54,8 @@
 #define LCD_SCL 26
 
 #define KEYPAD_PIN 35
-#define DIRECT_KEYPAD_PIN 34
+#define DIRECT_KEYPAD_PIN 34       // Position selection buttons (slots 0-4)
+#define ROTATION_KEYPAD_PIN 36     // CW/CCW rotation direction buttons
 
 #define ESTOP_PIN 33    // Digital input, INPUT_PULLUP. NC button to GND: HIGH when OK (button closed), LOW when E-Stop triggered (button opened or wire cut).
 #define LED_HOME_PIN 32 // Optional: onboard LED for home status indication (ADC1_CH4, used as digital output)
@@ -74,14 +75,17 @@ const int KEYPAD_THRESHOLD_3 = 1400;
 const int KEYPAD_THRESHOLD_4 = 2300;
 const int KEYPAD_THRESHOLD_5 = 3600;
 
-// Direct keypad thresholds
-const int DIRECT_KEYPAD_THRESHOLD_1 = 130;
-const int DIRECT_KEYPAD_THRESHOLD_2 = 570;
-const int DIRECT_KEYPAD_THRESHOLD_3 = 1170;
-const int DIRECT_KEYPAD_THRESHOLD_4 = 1740;
-const int DIRECT_KEYPAD_THRESHOLD_5 = 2370;
-const int DIRECT_KEYPAD_THRESHOLD_6 = 3100;
-const int DIRECT_KEYPAD_THRESHOLD_7 = 3700;
+// Direct keypad thresholds (GPIO34 - 5 position buttons: 0, 20, 40, 60, 80% of 4095)
+// Midpoints: 10%, 30%, 50%, 70% = 410, 1229, 2048, 2867
+const int DIRECT_KEYPAD_THRESHOLD_1 = 410;   // ~10% midpoint between 0% and 20%
+const int DIRECT_KEYPAD_THRESHOLD_2 = 1229;  // ~30% midpoint between 20% and 40%
+const int DIRECT_KEYPAD_THRESHOLD_3 = 2048;  // ~50% midpoint between 40% and 60%
+const int DIRECT_KEYPAD_THRESHOLD_4 = 2867;  // ~70% midpoint between 60% and 80%
+const int DIRECT_KEYPAD_THRESHOLD_5 = 3686;  // ~90% midpoint between 80% and 100%
+
+// Rotation keypad thresholds (GPIO36 - CCW/CW buttons: 25% and 75% of 4095)
+// Midpoint: 50% = 2048
+const int ROTATION_KEYPAD_THRESHOLD = 2048;  // 50% midpoint between 25% and 75%
 
 // Home switch threshold (hall sensor)
 const int HOME_SWITCH_THRESHOLD = 1500;
@@ -290,6 +294,7 @@ void runTestAccel();
 
 int readKeypad();
 int readDirectKeypad();
+int readRotationKeypad();
 int readHomeSwitch();
 int readEStop();
 
@@ -1369,9 +1374,11 @@ long calculateGoToSavedPosition(long currentPos, long targetPos, long stepsPerRe
 void handleDirectButtons()
 {
   static unsigned long lastDirectKeyTime = 0;
+  static unsigned long lastRotationKeyTime = 0;
+  static int lastRotationKey = 0;
   unsigned long currentTime = millis();
 
-  // Position selection (GPIO34)
+  // Position selection (GPIO34) - 5 buttons for slots 0-4
   int posKey = readDirectKeypad();
   if (posKey != lastDirectKey && (currentTime - lastDirectKeyTime > debounceDelay))
   {
@@ -1383,15 +1390,24 @@ void handleDirectButtons()
       selectedPositionIndex = posKey - 1;
       logSmart("Position slot " + String(selectedPositionIndex) + " selected (Saved Pos: " + String(savedPositions[selectedPositionIndex]) + ")");
     }
-    else if (posKey == 6 || posKey == 7)
-    { // Button 6 = CCW, Button 7 = CW
+  }
+
+  // Rotation direction buttons (GPIO36) - CCW and CW
+  int rotKey = readRotationKeypad();
+  if (rotKey != lastRotationKey && (currentTime - lastRotationKeyTime > debounceDelay))
+  {
+    lastRotationKey = rotKey;
+    lastRotationKeyTime = currentTime;
+
+    if (rotKey >= 1 && rotKey <= 2)
+    { // Button 1 = CCW, Button 2 = CW
       if (selectedPositionIndex < 0 || selectedPositionIndex >= 5)
       {
         logSmart("ERROR: Select a position first (buttons 1-5)");
         return;
       }
 
-      String dir = (posKey == 6) ? "CCW" : "CW";
+      String dir = (rotKey == 1) ? "CCW" : "CW";
       long currentPos = getCurrentPosition();
       long targetSlotPos = savedPositions[selectedPositionIndex];
 
@@ -1509,10 +1525,38 @@ int readDirectKeypad()
       key = 4;
     else if (avgValue < DIRECT_KEYPAD_THRESHOLD_5)
       key = 5;
-    else if (avgValue < DIRECT_KEYPAD_THRESHOLD_6)
-      key = 6;
-    else if (avgValue < DIRECT_KEYPAD_THRESHOLD_7)
-      key = 7;
+  }
+
+  return key;
+}
+
+int readRotationKeypad()
+{
+  static int readingsR[3] = {0, 0, 0};
+  static int index = 0;
+
+  int currentReading = analogRead(ROTATION_KEYPAD_PIN);
+  readingsR[index] = currentReading;
+  index = (index + 1) % 3;
+
+  int sum = readingsR[0] + readingsR[1] + readingsR[2];
+  int avgValue = sum / 3;
+
+  float variance = 0;
+  for (int i = 0; i < 3; i++)
+  {
+    variance += pow(readingsR[i] - avgValue, 2);
+  }
+  variance /= 3;
+  float stdDev = sqrt(variance);
+
+  int key = 0;
+  if (stdDev < 50)
+  {
+    if (avgValue < ROTATION_KEYPAD_THRESHOLD)
+      key = 1;  // CCW button (25% region)
+    else
+      key = 2;  // CW button (75% region)
   }
 
   return key;
